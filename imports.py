@@ -5,6 +5,13 @@ matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
+from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.patches as patches
+np.set_printoptions(suppress=True, precision=3)
+from datetime import datetime
+from itertools import chain
+from scipy import stats
+from matplotlib.gridspec import GridSpec
 
 import os
 import os.path
@@ -21,15 +28,39 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.stats import zscore
 from scipy.stats import pearsonr
 
+from sklearn.manifold import MDS
+from sklearn.metrics import pairwise_distances
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.manifold import Isomap
+from collections import defaultdict
+from mpl_toolkits.mplot3d import Axes3D
+import umap
+import hdbscan
+from sklearn.decomposition import PCA
+from scipy.spatial.distance import cosine
+from scipy.linalg import svd
+from collections import defaultdict, Counter
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.cluster.hierarchy import dendrogram
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import pairwise_distances
+from sklearn.metrics import jaccard_score
 from joblib import load, dump
 import imageio
 import cv2
 import random
 import math
+import json
+from joblib import dump, load
 from types import SimpleNamespace
 import colorednoise as cn
 from PIL import Image
 from tqdm import tqdm
+import re
 
 from scipy.ndimage import median_filter
 from scipy import signal
@@ -44,7 +75,7 @@ from glob import glob
 
 from rastermap import Rastermap, utils
 from scipy.stats import zscore
-
+from scipy.spatial.distance import pdist, squareform
 
 from sklearn.preprocessing import minmax_scale
 from sklearn.preprocessing import StandardScaler
@@ -117,3 +148,4 @@ from scipy.interpolate import interp1d
 # plt.xlabel('Frequency (Hz)')
 # plt.ylabel('Amplitude')
 # plt.show()
+
