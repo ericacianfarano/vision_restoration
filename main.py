@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 
 from classes import *
-#from classes_olfaction import *
+from full_field_plots import *
 
 animals_days = {'EC_GCaMP6s_07': ['20240927'], 'EC_GCaMP6s_08': ['20240926']}           #simple  8 orientation x 6 repeats
 animals_days = {'EC_GECO920_17': ['20241004']} #                 control geco phpeb animal (seeing) imaged at 920           'EC_GCaMP6s_11': ['20241009', '20241113'],
@@ -26,6 +26,33 @@ animals_days = {'EC_MWopto_04': ['20241111', '20241112', '20241113','20241120', 
                 'EC_RD1_08': ['20250108'], #['20241003','20241116'],
                 'EC_RD1_09': ['20250110'], #['20241007','20241113'],
                 'EC_RD1_10': ['20250110'], #['20241007','20241113'],
+                'EC_GNAT_03': ['20240924'],
+                'EC_GNAT_05': ['20240924'],
+                'EC_GNAT_06': ['20240924'],
+                'EC_GNAT_04': ['20241004'],
+                }
+
+
+#animals_days = {'EC_GCaMP6s_06': ['20241121']}
+data_object = DataAnalysis (['E:\\vision_restored', 'I:\\vision_restored'], dict_animals_days = animals_days, response_type = 'fluorescence', dlc = False, show_plots = False)
+
+del data_object.dat['EC_MWopto_03']
+del data_object.dat['EC_MWopto_04']['20241129'] #l23 recordings
+del data_object.dat['EC_MWopto_04']['20241113']
+del data_object.dat['EC_MWopto_05']['20241127']['big100_chirps_000_008']
+del data_object.dat['EC_MWopto_08']['20250306']['big100_chirps_000_003']
+del data_object.dat['EC_MWopto_10']['20250306']['big100_chirps_000_007']
+del data_object.dat['EC_MWopto_10']['20250311']
+del data_object.dat['EC_GCaMP6s_09']['20241122']['big100_chirps_000_008']
+
+
+animals_days = {'EC_GCaMP6s_11': ['20241113'],
+                'EC_GCaMP6s_12': ['20250123'],
+                'EC_GCaMP6s_13': ['20250123'],
+                'EC_GNAT_03': ['20240924'],
+                'EC_GNAT_05': ['20240924'],
+                'EC_GNAT_06': ['20240924'],
+                'EC_GNAT_04': ['20241004'],
                 }
 
 #
@@ -37,6 +64,258 @@ animals_days = {'EC_MWopto_04': ['20241111', '20241112', '20241113','20241120', 
 #                 'EC_GCaMP6s_12': ['20250123'],
 #                 'EC_GCaMP6s_13': ['20250123'],
 #                 }
+
+
+
+###############
+#clustering FFF
+groups = np.unique([animal[3:-3] for animal in data_object.dat.keys()])
+screen = 'small'
+recording = 'chirp'
+min_cells = np.array(list(chain.from_iterable(
+    [np.array(data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0).shape)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys()
+    for day in data_object.dat[animal].keys())))[:,0].min()
+min_timepoints = np.array(list(chain.from_iterable(
+    [np.array(data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0).shape)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys()
+    for day in data_object.dat[animal].keys())))[:,1].min()
+control = np.array(list(chain.from_iterable(
+    [data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0)[:min_cells, :min_timepoints].reshape(-1)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys() if 'GCaMP6s' in animal
+    for day in data_object.dat[animal].keys())))
+restored = np.array(list(chain.from_iterable(
+    [data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0)[:min_cells, :min_timepoints].reshape(-1)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys() if 'MWopto' in animal
+    for day in data_object.dat[animal].keys())))
+rd1 = np.array(list(chain.from_iterable(
+    [data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0)[:min_cells, :min_timepoints].reshape(-1)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys() if 'RD1' in animal
+    for day in data_object.dat[animal].keys())))
+
+############ PCA of tunign curves
+recording = 'SFxO'
+screen = 'big'
+min_cells = np.array(list(chain.from_iterable(
+    [np.array(data_object.dat[animal][day][sub_file]['tuning_curves_sf_pref'].mean(axis = 0).shape)
+     for sub_file in data_object.dat[animal][day].keys() if (('l4' not in sub_file )and (recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys()
+    for day in data_object.dat[animal].keys())))[:,1].min()
+
+def pop_dat (object, group, recording, screen):
+    g = np.array(list(chain.from_iterable(
+        [object.dat[animal][day][sub_file]['tuning_curves_sf_pref'].mean(axis=0)[:, :min_cells].T
+         for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+        for animal in object.dat.keys() if group in animal
+        for day in object.dat[animal].keys())))
+    return g
+
+def pop_dat (object, group, recording, screen, thresholded = True, label = 'OSI'):
+    '''
+    for a single animal
+    :param object:
+    :param group:
+    :param recording:
+    :param screen:
+    :param thresholded:
+    :param label: 'OSI' or 'pref_ori'
+    :return:
+    '''
+    if thresholded:
+        g = np.vstack((list(chain.from_iterable(
+            [(object.dat[animal][day][sub_file]['ori_tuning_curves_sf_pref'].mean(axis=0)/object.dat[animal][day][sub_file]['tuning_curves_sf_pref'].mean(axis = 0).max(axis = 0)).T [(object.dat[animal][day][sub_file]['thresholded_cells']==1) & (object.dat[animal][day][sub_file]['OSI']>0.)]
+             for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+            for animal in object.dat.keys() if group in animal
+            for day in object.dat[animal].keys()))))
+        if label == 'pref_ori':
+            labels = np.round(np.hstack((list(chain.from_iterable(
+                [object.dat[animal][day][sub_file]['preferred_orientation'][(object.dat[animal][day][sub_file]['thresholded_cells']==1) & (object.dat[animal][day][sub_file]['OSI']>0.)]#[(object.dat[animal][day][sub_file]['thresholded_cells']==1) & (object.dat[animal][day][sub_file]['OSI']>0.7)]
+                 for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys()))))/ 10) * 10
+        elif label == 'OSI':
+            labels = np.round(np.hstack((list(chain.from_iterable(
+                [object.dat[animal][day][sub_file]['OSI'][(object.dat[animal][day][sub_file]['thresholded_cells']==1) & (object.dat[animal][day][sub_file]['OSI']>0.)]
+                 for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys())))),2)
+    else:
+        g = np.vstack((list(chain.from_iterable(
+            [(object.dat[animal][day][sub_file]['ori_tuning_curves_sf_pref'].mean(axis=0)/object.dat[animal][day][sub_file]['tuning_curves_sf_pref'].mean(axis = 0).max(axis = 0)).T[object.dat[animal][day][sub_file]['OSI']>0.3]
+             for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+            for animal in object.dat.keys() if group in animal
+            for day in object.dat[animal].keys()))))
+        if label == 'pref_ori':
+            labels = np.round(np.hstack((list(chain.from_iterable(
+                [object.dat[animal][day][sub_file]['preferred_orientation'][object.dat[animal][day][sub_file]['OSI']>0.3] #[(object.dat[animal][day][sub_file]['thresholded_cells']==1) & (object.dat[animal][day][sub_file]['OSI']>0.7)]
+                 for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys()))))/ 10) * 10
+        elif label == 'OSI':
+            labels = np.round(np.hstack((list(chain.from_iterable(
+                [object.dat[animal][day][sub_file]['OSI'][object.dat[animal][day][sub_file]['OSI']>0.3]
+                 for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys())))),2)
+    return g,labels
+
+
+def pop_dat_fff (object, group, recording, screen, thresholded = True):
+    '''
+    for a single animal
+    :param object:
+    :param group:
+    :param recording:
+    :param screen:
+    :param thresholded:
+    :param label: 'OSI' or 'pref_ori'
+    :return:
+    '''
+    if thresholded:
+        g = np.vstack((list(chain.from_iterable(
+            [(object.dat[animal][day][sub_file]['zscored_matrix_baseline'][...,4*data_object.fps:16*data_object.fps].mean(axis=0)/object.dat[animal][day][sub_file]['zscored_matrix_baseline'][...,4*data_object.fps:16*data_object.fps].mean(axis = 0).max(axis = 1)[:,None]) [object.dat[animal][day][sub_file]['thresholded_cells']==1]
+             for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+            for animal in object.dat.keys() if group in animal
+            for day in object.dat[animal].keys()))))
+    else:
+        g = np.vstack((list(chain.from_iterable(
+            [(object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis=0)/object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0).max(axis = 1)[:,None])
+             for sub_file in object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+            for animal in object.dat.keys() if group in animal
+            for day in object.dat[animal].keys()))))
+    return g
+
+
+def plot_embedding (array, labels, method='PCA', components = [0,1]):
+    if method == 'PCA':
+        pca = PCA(n_components=4)
+        embedding = pca.fit_transform(array)
+    elif method == 'UMAP':
+        reducer = umap.UMAP(n_components=4, random_state=42)
+        embedding = reducer.fit_transform(array)
+    elif method == 'ISOMAP':
+        isomap = Isomap(n_components=4, n_neighbors=5)
+        embedding = isomap.fit_transform(array)
+
+    # Sort the unique numeric conditions so Seaborn will color them in ascending order
+    unique_conditions_sorted = np.sort(np.unique(labels))
+
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(
+        x=embedding[:, components[0]],
+        y=embedding[:, components[1]],
+        hue=labels,
+        palette="turbo",
+        hue_order=unique_conditions_sorted,  # <---- ensures numeric ordering
+        s=100, alpha=0.8
+    )
+    plt.title("Embedding")
+    plt.legend(title="Condition")
+    plt.show()
+
+# control,conditions_num = pop_dat (data_object, 'GCaMP6s', 'SFxO', 'big100', thresholded = True)
+# rd1,conditions_num = pop_dat (data_object, 'RD1', 'SFxO', 'big100', thresholded = False)
+# restored,conditions_num = pop_dat (data_object, 'MWopto', 'SFxO', 'big100', thresholded = True)
+# rd1,conditions_num = pop_dat (data_object, 'RD1', 'SFxO', 'big100', thresholded = False)
+# plot_embedding(rd1, conditions_num, method = 'ISOMAP', components = [0,1])
+
+control,conditions_num = pop_dat (data_object, 'GCaMP6s', 'SFxO', 'big100', thresholded = True)
+plot_embedding(control, conditions_num, method = 'ISOMAP', components = [0,1])
+plot_embedding(control, conditions_num, method = 'PCA', components = [0,1])
+
+# orientation data
+control,conditions_num = pop_dat (data_object, 'GCaMP6s', 'SFxO', 'big100', thresholded = True)
+rd1,conditions_num = pop_dat (data_object, 'RD1', 'SFxO', 'big100', thresholded = True)
+restored,conditions_num = pop_dat (data_object, 'MWopto', 'SFxO', 'big100', thresholded = True)
+data_flattened = np.vstack((control, restored, rd1)) # shape n_animals, n_cells x n_timepoints
+groups = np.unique([animal.split('_')[1] for animal in data_object.dat.keys()])
+conditions = [groups[0]]*control.shape[0] + [groups[1]]*restored.shape[0] + [groups[2]]*rd1.shape[0]
+plot_embedding(data_flattened, conditions, method = 'PCA', components = [0,1])
+
+## fff data
+control = pop_dat_fff (data_object, 'GCaMP6s', 'chirp', 'big100', thresholded = True)
+rd1 = pop_dat_fff (data_object, 'RD1', 'chirp', 'big100', thresholded = True)
+restored = pop_dat_fff (data_object, 'MWopto', 'chirp', 'big100', thresholded = True)
+data_flattened = np.vstack((control, restored, rd1)) # shape n_animals, n_cells x n_timepoints
+groups = np.unique([animal.split('_')[1] for animal in data_object.dat.keys()])
+conditions = [groups[0]]*control.shape[0] + [groups[1]]*restored.shape[0] + [groups[2]]*rd1.shape[0]
+
+
+# Apply UMAP to reduce to 2D
+reducer = umap.UMAP(n_components=2, random_state=42)
+embedding = reducer.fit_transform(control)
+# pca = PCA(n_components=5)
+# embedding = pca.fit_transform(data_flattened)
+# control = data_flattened
+
+# isomap = Isomap(n_components=6, n_neighbors=5)
+# embedding = isomap.fit_transform(control)
+
+# plt.figure(figsize=(8, 6))
+# sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=conditions, palette="turbo", s=100, alpha=0.8)
+# plt.title("Embedding")
+# plt.legend(title="Condition")
+# plt.show()
+
+
+
+
+#orientations
+recording = 'SFxO'
+min_cells = np.array(list(chain.from_iterable(
+    [np.array(data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0).shape)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys()
+    for day in data_object.dat[animal].keys())))[:,-2].min()
+min_timepoints = np.array(list(chain.from_iterable(
+    [np.array(data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0).shape)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys()
+    for day in data_object.dat[animal].keys())))[:,-1].min()
+control = np.array(list(chain.from_iterable(
+    [data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0)[:,:,:min_cells, :min_timepoints].reshape(-1)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys() if 'GCaMP6s' in animal
+    for day in data_object.dat[animal].keys())))
+restored = np.array(list(chain.from_iterable(
+    [data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0)[:,:,:min_cells, :min_timepoints].reshape(-1)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys() if 'MWopto' in animal
+    for day in data_object.dat[animal].keys())))
+rd1 = np.array(list(chain.from_iterable(
+    [data_object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis = 0)[:,:,:min_cells, :min_timepoints].reshape(-1)
+     for sub_file in data_object.dat[animal][day].keys() if ((recording in sub_file) and (screen in sub_file))]
+    for animal in data_object.dat.keys() if 'RD1' in animal
+    for day in data_object.dat[animal].keys())))
+
+data_flattened = np.vstack((control, restored, rd1)) # shape n_animals, n_cells x n_timepoints
+conditions = [groups[0]]*control.shape[0] + [groups[1]]*restored.shape[0] + [groups[2]]*rd1.shape[0]
+# Apply UMAP to reduce to 2D
+# reducer = umap.UMAP(n_components=2, random_state=42)
+# embedding = reducer.fit_transform(data_flattened)
+pca = PCA(n_components=10)
+embedding = pca.fit_transform(data_flattened)
+isomap = Isomap(n_components=6, n_neighbors=5)
+embedding = isomap.fit_transform(data_flattened)
+
+plt.figure(figsize=(8, 6))
+sns.scatterplot(x=embedding[:, 6], y=embedding[:, 7], hue=conditions, palette="plasma", s=100, alpha=0.8)
+plt.xlabel("Dim 1")
+plt.ylabel("Dim 2")
+plt.title("Embedding of Neural Data")
+plt.legend(title="Condition")
+plt.show()
+########################
+# Step 2: K-Means Clustering
+# n_clusters = 6  # Choose number of clusters
+# kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+# cluster_labels = kmeans.fit_predict(neural_embedding)
+
 
 plt.figure()
 thresh = data_object.dat['EC_GCaMP6s_06']['20241121']['big100_chirps_000_000']['thresholded_cells']
@@ -55,8 +334,32 @@ plt.legend()
 plt.show()
 
 
+animals_days = {
+                'EC_GCaMP6s_05': ['20240925'],
+                'EC_GCaMP6s_06': ['20240925', '20241113', '20241121'],
+                'EC_GCaMP6s_08': ['20240927'], #0927
+                'EC_GCaMP6s_09': ['20241113', '20241122'],
+                'EC_RD1_06': ['20250314'],
+                'EC_RD1_08': ['20250314'],
+                'EC_RD1asleep_06': ['20250315'],
+                'EC_RD1asleep_08': ['20250315']
+                }
+
+
 #animals_days = {'EC_GCaMP6s_06': ['20241121']}
 data_object = DataAnalysis (['H:\\vision_restored', 'G:\\vision_restored'], dict_animals_days = animals_days, response_type = 'fluorescence', dlc = False, show_plots = False)
+
+# plotting tunign curves
+tc = data_object.dat['EC_GCaMP6s_09']['20241122']['big100_SFxO_000_010']['tuning_curves_sf_pref'].mean(axis = 0)
+colors_cells = plt.cm.plasma(np.linspace(0, 0.8, 6))
+plt.figure(figsize = (5,6))
+for i, cell in enumerate([8,3,1,10,22,9]):
+    plt.plot(tc[:,cell]/tc[:,cell].max() + i*1.2 , c = colors_cells[i], linewidth = 2)
+
+plt.xticks(np.arange(0,8,2), labels = [int(a) for a in np.unique(data_object.dat['EC_GCaMP6s_09']['20241122']['big100_SFxO_000_010']['thetas'])[::2]])
+#plt.xticklabels(np.unique(data_object.dat['EC_GCaMP6s_09']['20241122']['big100_SFxO_000_010']['thetas'])[::2])
+plt.show()
+
 
 # full field flash response
 plot_on_off_index(data_object, thresholded_cells = True)
@@ -64,6 +367,8 @@ avg_onoff_response(data_object)
 avg_onoff_response_groups(data_object)
 plot_response_speed(data_object, thresholded_cells = True)
 plot_response_amplitude(data_object, thresholded_cells = True)
+responsive_cells_hist (data_object)
+responsive_cells_hist_gnat (data_object)
 
 # olfaction stuff
 animals_days = {'EC_RD1_06': ['20250223'], 'EC_RD1_08': ['20250223']}           #simple  8 orientation x 6 repeats
@@ -74,6 +379,53 @@ arr = data_object.dat['EC_RD1_06']['20250223']['olf_v1_000_000']['responses']
 ttl = data_object.dat['EC_RD1_06']['20250223']['olf_v1_000_000']['ttl_data']
 
 ttl_responses = np.array([arr [:, t:t+data_object.fps*4] for t in ttl])
+
+
+
+def avg_onoff_response_asleep(object):
+
+    groups = ['GCaMP6s', 'RD1_', 'RD1asleep']
+    colours = ['black', 'blue', 'red']
+    screen = 'big'
+
+    min_timepoints = np.array(
+        list(chain.from_iterable([object.dat[animal][day][sub_file]['zscored_matrix_baseline'].shape[-1]
+                                  for sub_file in object.dat[animal][day].keys() if ('chirp' in sub_file)]
+                                 for animal in object.dat.keys()
+                                 for day in object.dat[animal].keys()))).min()
+
+    fig, ax = plt.subplots(1, len(groups), figsize=(12, 8), sharex = True, sharey=True)
+
+    for i_group, group_name in enumerate(groups):
+        group_dat = np.array(list(chain.from_iterable(
+            [object.dat[animal][day][sub_file]['zscored_matrix_baseline'][1:,
+             object.dat[animal][day][sub_file]['thresholded_cells'] == 1, :min_timepoints].mean(axis=(0, 1))
+             for sub_file in object.dat[animal][day].keys() if (('chirp' in sub_file) and (screen in sub_file))]
+            for animal in object.dat.keys() if (group_name in animal)
+            for day in object.dat[animal].keys())))
+
+
+        ax[i_group].plot(np.arange(min_timepoints),group_dat.T, alpha = 0.7, color=colours[i_group])
+        #ax[i_group].plot(np.arange(min_timepoints), np.nanmean(group_dat, axis=0), linewidth = 2, color='black')
+        screen_label = 'Ultrabright' if screen == 'small' else 'Regular'
+        ax[i_group].set_title (f'{group_name}, {screen_label} monitor', fontsize = 10)
+
+        ax[i_group].axvline(object.fps * 0, c='grey', alpha=0.5)
+        ax[i_group].axvline(object.fps * 4, c='black', alpha=0.5)
+        ax[i_group].axvline(object.fps * 8, c='black', alpha=1, linestyle='--')
+        ax[i_group].axvline(object.fps * 12, c='black', alpha=0.5)
+        ax[i_group].axvline(object.fps * 16, c='grey', alpha=0.5)
+        ax[i_group].set_xlabel('Time since stimulus onset (s)')
+        ax[i_group].set_ylabel('Z-scored response')
+        ax[i_group].set_xticks(np.arange(min_timepoints)[::4 * object.fps],
+                         (np.arange(min_timepoints) // object.fps)[::4 * object.fps])
+
+    plt.suptitle('Full-Field Flash response')
+    plt.tight_layout()
+    #save_fig(object, 'Full-Field Flash', 'average on-off responses groups')
+    plt.show()
+
+
 
 ############### ENSEMBLES
 
@@ -208,313 +560,6 @@ with PdfPages(os.path.join(data_object.save_path, 'pca_projection.pdf')) as pdf:
 
             #plot_pca_projection_ax(ax, animal, principal_components, n_repeats, n_orientations)
             #plot_variance_explained(animal, explained_variance_ratio)
-
-def filter_active_epochs (data_trials_array, response_threshold = 3, cell_threshold = 4):
-    '''
-    Remove epochs with no activity or only 1-2 cells active
-    :param data_trials_array: numpy array of shape (n_cells, n_chunks)
-    :param threshold: z-score threshold that cells need to be to be considered active
-    :return:
-    '''
-    # check whether each cell goes above response threshold in each epoch
-    # then count number of cells (per epoch) that exceed response threshold (shape n_epochs)
-    cells_above_threshold = np.any(data_trials_array > response_threshold, axis=-1).sum(axis = -1)
-
-    # valid epochs are only those with > 2 cells co-active (shape n_epochs)
-    valid_epochs = cells_above_threshold >= cell_threshold
-
-    return valid_epochs
-
-
-
-chunk_size = 10 # n frames
-
-#with PdfPages(os.path.join(data_object.save_path, 'pca_projection_spon.pdf')) as pdf:
-var_explained = {'Control': [], 'RD1':[]}
-
-for i_animal, animal in enumerate(animals_days.keys()):
-
-    group = 'Control' if 'GCaMP6s' in animal else 'RD1'
-
-    # list of tuples, with each entry being (day, subfile)
-    days_recordings = [(day, subfile) for day in animals_days[animal] for subfile in data_object.dat[animal][day].keys() if ('SFxTF' in subfile) and ('big' in subfile)][:2]
-
-    for i, (day, subfile) in enumerate(days_recordings):
-        print(animal, day, subfile)
-
-        # shape n_Cells, n_timepoints
-        spon_arr = np.squeeze(data_object.dat[animal][day][subfile]['zscored_responses_ttls']['Wait_1'])
-        n_full_chunks = spon_arr.shape[1] // chunk_size
-
-        # shape > (n_trials, n_features, n_timepoints_per_epoch) (n_epochs, n_cells, n_timepoints)
-        #data_trials = np.array([spon_arr[:,i:i + chunk_size] for i in range(0, n_full_chunks * chunk_size, chunk_size)]).reshape (n_full_chunks, -1)
-        data_trials_all = np.array([spon_arr[:, i:i + chunk_size] for i in range(0, n_full_chunks * chunk_size, chunk_size)])
-
-        # only take epochs that have at least 'cell_threshold' co-active cells that each go above 'response_threshold' > (n_epochs, n_cells, n_timepoints)
-
-        valid_epochs = filter_active_epochs(data_trials_all[:400], response_threshold=3, cell_threshold = 4)
-
-        plot_raster(data_trials_all, valid_epochs, n_trials_to_plot=60, n_cells_to_plot=400, threshold=4)
-
-        #####################
-
-        # then average over each epoch (time) to get average response> (n_epochs, n_cells)
-        data_trials = data_trials.mean (axis = -1)
-
-        print(f'{animal}, {day}, {data_trials.shape[0]/data_trials_all.shape[0]*100}% of trials have >4 coactive cells')
-
-        # Normalize each trial's activity pattern (vector) to unit length (L2 norm)
-        # each trial (each row) is normalized to unit length (its L2 norm is 1)
-        norms = np.linalg.norm(data_trials, axis=1, keepdims=True)
-        data_trials_normalized = data_trials / norms
-
-        # performing PCA & projection
-        pca, principal_components, explained_variance_ratio = perform_pca (data_trials_normalized, n_components = 10)
-
-        # calculating participation ratio (dimensionality)
-        #pr = participation_ratio(pca)
-
-        var_explained[group].append(explained_variance_ratio)
-
-        # screen = 'reg' if 'big' in subfile else 'ultrabright'
-        # n_repeats = None
-        # n_orientations = None
-        # # fig = plot_pca_projection(animal + ', ' + screen, principal_components, n_repeats, n_orientations, trial_type = 'spontaneous')
-        # # pdf.savefig(fig)
-        # # plt.close(fig)
-        #
-        # #plot_variance_explained(animal, explained_variance_ratio)
-        #
-        # if 'opto' not in animal:
-        #     color = 'red' if 'RD1' in animal else 'blue'
-        #     plt.plot(np.arange(1, len(explained_variance_ratio) + 1), explained_variance_ratio, c = color,alpha = 0.6, marker='o')
-
-variance_explained (var_explained)
-
-n_trials_plot = 15
-n_cells_plot = 100
-# take the first n_trials_plot trials
-data_trials = data_trials_all[20:20+n_trials_plot, :n_cells_plot]
-valid_epochs_short = valid_epochs[20:20+n_trials_plot]
-
-stacked_trials = data_trials.reshape((data_trials.shape[0]*data_trials.shape[-1], -1)).shape
-
-def binarize_array(data, threshold=4):
-    return (data >= threshold).astype(int)
-
-def plot_raster(data_trials_array, valid_epochs_arr, n_trials_to_plot = 20, n_cells_to_plot = 100, threshold=4):
-
-    # take the first n_trials_plot trials > shape n_epochs, n_cells, n_timepoints
-    dat = data_trials_array[:n_trials_to_plot, :n_cells_to_plot]
-    valid_epochs_short = valid_epochs_arr[:n_trials_to_plot]
-
-    # shape n_cells, n_epochs x n_timepoints
-    stacked_trials = np.hstack([dat[epoch] for epoch in range(dat.shape[0])])#dat.reshape((dat.shape[0]*dat.shape[-1], -1)).T
-    bin_stacked = binarize_array(stacked_trials, threshold=threshold)
-
-    plt.figure(figsize = (10,5))
-    plt.imshow(bin_stacked, cmap = 'Greys')
-    for epoch in range(dat.shape[0]):
-        if valid_epochs_short[epoch]:
-            plt.axvspan(epoch * dat.shape[-1], (epoch + 1) * dat.shape[-1], color='grey', alpha=0.2)
-            #print(epoch * dat.shape[-1], (epoch + 1) * dat.shape[-1])
-    plt.xticks(np.arange(0,stacked_trials.shape[-1],data_object.fps*5), np.arange(0,stacked_trials.shape[-1],data_object.fps*5)/data_object.fps)
-    plt.xlabel('Time (s)')
-    plt.ylabel('Cell Number')
-    plt.show()
-
-plot_raster(data_trials_all, valid_epochs, n_trials_to_plot = 20, n_cells_to_plot = 100, threshold=4)
-
-def plot_raster_with_valid_times(data_trials, valid_epochs, threshold=4):
-    """
-    Plots a raster with spikes where the response exceeds the threshold.
-    Grey vertical bars highlight timepoints where the epoch is valid.
-
-    :param data_trials: numpy array (n_epochs, n_cells, n_timepoints)
-    :param valid_epochs: boolean array (n_epochs,) indicating valid epochs
-    :param threshold: response threshold for detecting activity
-    """
-    n_epochs, n_cells, n_timepoints = data_trials.shape
-
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(12, 8))
-
-    for epoch in range(n_epochs):
-        # Identify active cells and their time points
-        active_cells, active_times = np.where(data_trials[epoch] > threshold)
-
-        # Offset y-values by epoch to separate trials
-        ax.scatter(active_times, active_cells + epoch * n_cells, s=1, color='black')
-
-        # Highlight valid time points with grey bars
-        if valid_epochs[epoch]:
-            ax.axvspan(epoch * n_timepoints, (epoch + 1) * n_timepoints, color='grey', alpha=0.2)
-        print(epoch * n_timepoints, (epoch + 1) * n_timepoints)
-
-    ax.set_xlabel("Time (frames)")
-    ax.set_ylabel("Cells (grouped by epoch)")
-    ax.set_title("Raster Plot with Valid Epochs Highlighted")
-    plt.show()
-
-
-plot_raster_with_valid_times(data_trials, valid_epochs_short, threshold=4)
-
-
-plt.figure()
-plt.imshow(arr[:100], cmap = 'Greys')
-[plt.axvline(line, c = 'red', alpha = 0.5) for line in np.arange(0,arr.shape[-1], chunk_size)]
-plt.show()
-
-
-plt.figure(figsize=(12, 8))
-for epoch_idx, (epoch, is_valid) in enumerate(zip(data_trials, valid_epochs)):
-    color = 'red' if is_valid else 'black'
-
-    cells, timepoints = np.where(epoch > 4)         # Find spike locations (nonzero values)
-    timepoints += epoch_idx * epoch.shape[1] # Adjust timepoints to stack epochs horizontally
-    plt.scatter(timepoints, cells, color=color, s=1) # plot spikes
-
-plt.xlabel('Time (stacked epochs)', fontsize=12)
-plt.ylabel('Cells', fontsize=12)
-plt.title('Raster Plot: Valid (Red) vs Invalid (Black)', fontsize=14)
-plt.show()
-
-# Create raster plot
-fig, ax = plt.subplots(figsize=(15, 8))
-
-# Get spike times (list of time indices for each cell)
-spike_times = [np.where(data_trials[cell])[0] for cell in range(n_cells)]
-
-# Plot raster (each row represents a different cell)
-ax.eventplot(spike_times, linelengths=0.8, linewidths=0.5, color="black")
-
-# Add vertical lines at epoch boundaries
-for i in range(1, n_epochs):
-    ax.axvline(i * epoch_length, color="red", linestyle="--", linewidth=1.5)
-
-# Labels and formatting
-ax.set_xlabel("Time (bins)")
-ax.set_ylabel("Cell index")
-ax.set_title("Raster Plot with 5 Epochs Stacked Horizontally")
-ax.invert_yaxis()  # Ensure cell 0 is at the top
-
-plt.tight_layout()
-plt.show()
-
-
-def variance_explained (var_explained_dictionary):
-    '''
-    Plot variance explained of the different groups in dictionary 'var_explained_dictionary' (Control & RD1)
-
-    Calculate the T-test for the means of two independent samples of scores (welche's t test)
-    to see if the first PCs in each group are statistically significant
-
-    '''
-
-    plt.figure(figsize=(8, 5))
-    control, rd1 = np.array(var_explained_dictionary['Control']),  np.array(var_explained_dictionary['RD1'])
-    control_mean, rd1_mean = control.mean(axis = 0), rd1.mean(axis = 0)
-    control_sem, rd1_sem = sem(control, axis = 0), sem(rd1, axis = 0)
-
-    plt.plot(control.T, alpha = 0.3, c = 'blue')
-    plt.plot(control_mean, alpha = 0.8, c = 'blue', linewidth = 2.5, label = 'Control')
-    plt.plot(rd1.T, alpha = 0.3, c = 'red')
-    plt.plot(rd1_mean, alpha = 0.8, c = 'red', linewidth = 2.5, label = 'RD1')
-    plt.fill_between(np.arange(control.shape[1]), control_mean - control_sem, control_mean + control_sem, color='blue', alpha=0.2)
-    plt.fill_between(np.arange(rd1.shape[1]), rd1_mean - rd1_sem, rd1_mean + rd1_sem, color='red', alpha=0.2)
-    plt.xticks([])
-    plt.yticks([])
-
-    plt.ylim([min(control_mean.min(), rd1_mean.min() - 0.005), max(control_mean.max(), rd1_mean.max()) + 0.02])
-
-    # welch's t tests on first PC
-    control_pc1 = np.array([arr[0] for arr in var_explained_dictionary['Control']])
-    rd1_pc1 = np.array([arr[0] for arr in var_explained_dictionary['RD1']])
-    t_stat, p_value = ttest_ind(control_pc1, rd1_pc1, equal_var=False)  # Welch's t-test (unequal variance assumption)
-    print(f"T-statistic: {t_stat:.4f}, p-value: {p_value:.4f}")
-    if p_value < 0.05:
-        plt.text(0, max(control_mean[0], rd1_mean[0]) + 0.01, '*', fontsize=20, ha='center')
-
-    plt.legend(fontsize = 14)
-    plt.xlabel('PC index')
-    plt.ylabel('Variance explained')
-    plt.title(f'Variance explained by PCs')
-    plt.show()
-
-
-
-def plot_pca_projection(animal, principal_components, n_repeats, n_orientations, trial_type = 'evoked'):
-    """
-    Plots the projection of trials onto the first two principal components,
-    with color indicating stimulus orientation.
-
-    Args:
-        animal (str): Animal identifier.
-        principal_components (np.ndarray): Principal components of shape (n_trials, n_components).
-        n_repeats (int): Number of stimulus repeats.
-        n_orientations (int): Number of stimulus orientations.
-        trial_type (str): either 'evoked' or 'spontaneous'
-    """
-
-    if trial_type == 'evoked':
-        # Assign colors according to orientation
-        orientations = np.linspace(0, 315, n_orientations)  # 0, 45, 90, ..., 315
-        orientation_ids = np.repeat(np.arange(n_orientations), n_repeats)
-        colors = orientations[orientation_ids]
-
-        fig = plt.figure(figsize=(5, 4))
-        #ax = fig.add_subplot(111, projection = '3d')
-        ax = fig.add_subplot(111)
-
-        scatter = ax.scatter(
-            principal_components[:, 0],
-            principal_components[:, 1],
-            #principal_components[:, 2],
-            c=colors,
-            cmap='plasma',
-            alpha=0.8
-        )
-
-        # color bar showing orientation
-        cbar = plt.colorbar(scatter, ax=ax, ticks=orientations)
-        cbar.set_label('Orientation (degrees)')
-        cbar.set_ticks(orientations)
-        cbar.set_ticklabels([f'{int(o)}°' for o in orientations])
-
-
-    elif trial_type == 'spontaneous':
-
-        fig = plt.figure(figsize=(5, 4))
-        #ax = fig.add_subplot(111, projection='3d')
-        ax = fig.add_subplot(111)
-
-        scatter = ax.scatter(
-            principal_components[:, 0],
-            principal_components[:, 1],
-            #principal_components[:, 2],
-            c=np.arange(principal_components.shape[0]),
-            cmap='plasma',
-            alpha=0.8
-        )
-
-    ax.set_xlabel('PC 1')
-    ax.set_ylabel('PC 2')
-    ax.set_title(f'{animal} - PCA Projection \n of single-trial grating-evoked activity')
-
-    plt.show()
-    return fig
-
-# ------------------------
-# Variance Explained Curve (for plot b)
-# ------------------------
-def plot_variance_explained(animal, explained_variance_ratio):
-    plt.figure(figsize=(5, 3))
-    plt.plot(np.arange(1, len(explained_variance_ratio) + 1), explained_variance_ratio, marker='o')
-    plt.xlabel('PC index')
-    plt.ylabel('Variance explained')
-    plt.title(f'Variance explained by PCs ({animal})')
-    return fig
-
 
         # for each recording, stack the first (2 mins) and last (15 mins) wait periods for the big & small screens
         # result is list with n_recordings elements, each with shape n_cells, n_timepoints

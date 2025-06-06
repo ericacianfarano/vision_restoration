@@ -299,7 +299,7 @@ def on_off_responses(object, animal, day, session):
 
 
 #data_object.dat['EC_RD1opto_04']['20241112']['small_chirp_000_006']['responses_ttls']
-def osi_pd_hist (object, responsive):
+def osi_pd_hist (object, responsive=True):
     '''
     :param object:
     :param responsive: whether or not to only consider responive cells that pass the z score threshold
@@ -307,38 +307,51 @@ def osi_pd_hist (object, responsive):
     '''
 
     screens = ['big', 'small']
-    fig, ax = plt.subplots(2, 2, sharey = True, figsize=(13, 10))
+    fig, ax = plt.subplots(2, 2, sharey = True, figsize=(9, 8))
 
-    for k, metric in enumerate(['OSI', 'DSI']):
+    # Extract data
+    def get_group_data(group_name, responsive):
+        if responsive:
+            return list(chain.from_iterable(
+                [object.dat[animal][day][sub_file][metric][object.dat[animal][day][sub_file]['thresholded_cells'] == 1]
+                 for sub_file in object.dat[animal][day].keys()
+                 if (('SFxO' in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                for animal in object.dat.keys() if group_name in animal
+                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal])
+            ))
+        else:
+            return list(chain.from_iterable(
+                [object.dat[animal][day][sub_file][metric]
+                 for sub_file in object.dat[animal][day].keys()
+                 if (('SFxO' in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                for animal in object.dat.keys() if group_name in animal
+                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal])
+            ))
+
+    for k, metric in enumerate(['OSI', 'DSI']):#enumerate(['OSI', 'DSI']):
         for i, screen in enumerate(screens):
 
             #np.nonzero(object.dat[animal][day][sub_file][metric] * object.dat[animal][day][sub_file]['thresholded_cells'])
             # average response across recordings, repeats, across cells
-            opto = list(chain.from_iterable(
-                [object.dat[animal][day][sub_file][metric]
-                 for sub_file in object.dat[animal][day].keys() if (('SFxO' in sub_file) and (screen in sub_file))]
-                for animal in object.dat.keys() if 'opto' in animal
-                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal])))
-            rd1 = list(chain.from_iterable(
-                [object.dat[animal][day][sub_file][metric]
-                 for sub_file in object.dat[animal][day].keys() if (('SFxO' in sub_file) and (screen in sub_file))]
-                for animal in object.dat.keys() if (('opto' not in animal) and ('RD1' in animal))
-                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal])))
-            control = list(chain.from_iterable(
-                [object.dat[animal][day][sub_file][metric]
-                 for sub_file in object.dat[animal][day].keys() if (('SFxO' in sub_file) and (screen in sub_file))]
-                for animal in object.dat.keys() if ('GCaMP6s' in animal)
-                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal])))
+            opto = get_group_data('MWopto', responsive)
+            rd1 = get_group_data('RD1', responsive)
+            control = get_group_data('GCaMP6s', responsive)
 
-            ax[k, i].hist(list(chain.from_iterable(opto)), color='blue', alpha=0.5,
-                       label=f'opto ({len(list(chain.from_iterable(opto)))} cells)', density=True,
-                       bins=np.linspace(0, 1, 50))
-            ax[k, i].hist(list(chain.from_iterable(rd1)), color='red', alpha=0.5,
-                       label=f'rd1 ({len(list(chain.from_iterable(rd1)))} cells)', density=True,
-                       bins=np.linspace(0, 1, 50))
-            ax[k, i].hist(list(chain.from_iterable(control)), color='black', alpha=0.5,
-                       label=f'control ({len(list(chain.from_iterable(control)))} cells)', density=True,
-                       bins=np.linspace(0, 1, 50))
+            # Flatten lists
+            opto = list(chain.from_iterable(opto))
+            rd1 = list(chain.from_iterable(rd1))
+            control = list(chain.from_iterable(control))
+
+            bins = np.linspace(0, 1, 30)
+            ax[k, i].hist(opto, edgecolor='blue', linewidth = 2, alpha=0.7,
+                       label=f'opto ({len(opto)} cells)', histtype='step',density=True,
+                       bins=bins)
+            ax[k, i].hist(rd1, edgecolor='red',linewidth = 2, alpha=0.7,
+                       label=f'rd1 ({len(rd1)} cells)', histtype='step',density=True,
+                       bins=bins)
+            ax[k, i].hist(control, edgecolor='black',linewidth = 2, alpha=0.7,
+                       label=f'control ({len(control)} cells)', histtype='step',density=True,
+                       bins=bins)
             if k == 0:
                 #ax[k, i].set_title(f'{screen} monitor \n \n {metric} distribution')
                 ax[k, i].set_title(f'Ultrabright Monitor \n \n {metric} distribution' if screen == 'small' else f'Regular Monitor \n \n {metric} distribution')
@@ -346,9 +359,35 @@ def osi_pd_hist (object, responsive):
                 ax[k, i].set_title(f'{metric} distribution')
             ax[k, i].set_xlabel(metric)
             ax[k, i].set_ylabel('proportion of cells')
-        #ax[i].set_ylim([0,1.05])
 
-    #plt.tight_layout()
+            # --------------- Statistical Tests --------------- #
+            # Kruskal-Wallis test (global test for all groups)
+            # this checks that at least one group differs significantly from the others
+            # p < 0.05 if at least one group differs
+            kw_stat, kw_pval = kruskal(control, rd1, opto)
+
+            # Pairwise KS tests
+            comparisons = [('Control', control), ('RD1', rd1), ('Opto', opto)]
+            ks_results = {}
+
+            for (name1, data1), (name2, data2) in itertools.combinations(comparisons, 2):
+                ks_stat, ks_pval = ks_2samp(data1, data2)
+                ks_results[f'{name1} vs {name2}'] = ks_pval
+
+            # # Pairwise Mann-Whitney U tests (alternative to KS)
+            # mw_results = {}
+            # for (name1, data1), (name2, data2) in itertools.combinations(comparisons, 2):
+            #     mw_stat, mw_pval = mannwhitneyu(data1, data2, alternative='two-sided')
+            #     mw_results[f'{name1} vs {name2}'] = mw_pval
+
+            # Print results
+            print(f'\n{metric} ({screen} monitor)')
+            print(f'Kruskal-Wallis test: p = {kw_pval:.4f}')
+            for comp, pval in ks_results.items():
+                print(f'KS test, {comp}: p = {pval:.4f}')
+            # for comp, pval in mw_results.items():
+            #     print(f'Mann-Whitney {comp}: p = {pval:.4f}')
+
     plt.legend()
     plt.savefig(os.path.join(object.save_path, 'OSI-DSI histogram'))
     plt.show()
@@ -357,49 +396,322 @@ def responsive_cells_hist (object):
 
     stims = ['chirps', 'SFxO']
     screens = ['big', 'small']
-    fig, ax = plt.subplots(2, 2, sharey = True, figsize=(8, 8))
+    fig, ax = plt.subplots(2, 2, sharey = True, figsize=(5, 8))
 
     for i_stim, stim in enumerate(stims):
         for i, screen in enumerate(screens):
             # average response across recordings, repeats, across cells
             opto = np.array(list(chain.from_iterable(
                 [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
-                 for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file))]
-                for animal in object.dat.keys() if 'opto' in animal
+                 for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                for animal in object.dat.keys() if 'MWopto' in animal
                 for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
             rd1 = np.array(list(chain.from_iterable(
                 [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
-                 for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file))]
-                for animal in object.dat.keys() if (('opto' not in animal) and ('RD1' in animal))
+                 for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                for animal in object.dat.keys() if ('RD1' in animal)
                 for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
             control = np.array(list(chain.from_iterable(
                 [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
-                 for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file))]
+                 for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
                 for animal in object.dat.keys() if ('GCaMP6s' in animal)
                 for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
 
-            ax[i_stim, i].scatter(np.array([0] * len(control)), control, s = 65, color = 'grey', alpha = 0.6, label = 'control')
-            ax[i_stim, i].scatter(np.array([1] * len(rd1)), rd1, s = 65, color = 'red', alpha = 0.6, label = 'RD1')
-            ax[i_stim, i].scatter(np.array([2] * len(opto)), opto,s = 65, color = 'blue', alpha = 0.6, label = 'opto')
+            print(stim, screen)
+            print('opto', opto.mean(),'rd1',rd1.mean(), 'control', control.mean())
 
-            ax[i_stim, i].bar(np.array([0]), control.mean(), color = 'grey', alpha = 0.3, label = 'control')
-            ax[i_stim, i].bar(np.array([1]), rd1.mean(), color = 'red', alpha = 0.3, label = 'RD1')
+            # if stim == 'SFxO':
+            #     gnat = np.array(list(chain.from_iterable(
+            #         [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
+            #          for sub_file in object.dat[animal][day].keys() if ((screen in sub_file) and ('l4' not in sub_file))]
+            #         for animal in object.dat.keys() if ('GNAT' in animal)
+            #         for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+            #
+            #     print(gnat)
+            # is there a statistically sig diff in the distributions of the three groups?
+            stat, p = kruskal(control, rd1, opto)
+            print(f'KW H-statistic: {stat:.3f}, p-value: {p:.3f}')
+
+            if p < 0.05: # follow up with testing pairwise comparisons (with correction for multiple comparisons)
+                # Do pairwise comparisons manually:
+                print('mannwhitney two-sided test, with bonferroni multiple comparison correction')
+                pvals = [
+                    mannwhitneyu(control, rd1, alternative='two-sided').pvalue,
+                    mannwhitneyu(control, opto, alternative='two-sided').pvalue,
+                    mannwhitneyu(rd1, opto, alternative='two-sided').pvalue
+                ]
+
+                # Apply Bonferroni correction manually (3 comparisons):
+                _, pvals_corrected, _, _ = multipletests(pvals, alpha=0.05, method='bonferroni')
+
+                print(pvals_corrected)
+
+                # Define comparisons in same order as pvals
+                comparisons = [
+                    ('GCaMP6s', 'rd1'),
+                    ('GCaMP6s', 'opto'),
+                    ('rd1', 'opto')
+                ]
+
+                # Coordinates for group positions on x-axis
+                group_coords = {'GCaMP6s': 0, 'rd1': 1, 'opto': 2}
+                max_val = max(np.max(control), np.max(rd1), np.max(opto)) * 1.05
+                step = max_val * 0.05  # vertical spacing between significance bars
+                h = max_val
+
+                # Loop through each comparison and plot if significant
+                for (group1, group2), p_val in zip(comparisons, pvals_corrected):
+                    if p_val < 0.05:
+                        x1, x2 = group_coords[group1], group_coords[group2]
+                        y = h
+                        h += step  # update height for next line if needed
+
+                        # Decide number of stars
+                        if p_val < 0.001:
+                            stars = '***'
+                        elif p_val < 0.01:
+                            stars = '**'
+                        else:
+                            stars = '*'
+
+                        # Draw the line and stars
+                        ax[i_stim, i].plot([x1, x1, x2, x2], [y, y + step / 2, y + step / 2, y], lw=1.5, c='k')
+                        ax[i_stim, i].text((x1 + x2) * 0.5, y + step * 0.6, stars,
+                                           ha='center', va='bottom', fontsize=14)
+
+            ax[i_stim, i].scatter(np.array([0] * len(control)), control, s = 35, color = 'black', alpha = 0.45, label = 'control')
+            ax[i_stim, i].scatter(np.array([1] * len(rd1)), rd1, s = 35, color = 'firebrick', alpha = 0.45, label = 'RD1')
+            ax[i_stim, i].scatter(np.array([2] * len(opto)), opto,s = 35, color = 'blue', alpha = 0.45, label = 'opto')
+            # if stim == 'SFxO':
+            #     ax[i_stim, i].scatter(np.array([3] * len(gnat)), gnat, s=65, color='pink', alpha=0.6, label='GNAT')
+
+            ax[i_stim, i].bar(np.array([0]), control.mean(), color = 'black', alpha = 0.3, label = 'control')
+            ax[i_stim, i].bar(np.array([1]), rd1.mean(), color = 'firebrick', alpha = 0.3, label = 'RD1')
             ax[i_stim, i].bar(np.array([2]), opto.mean(), color = 'blue', alpha = 0.3, label = 'opto')
+
+            ax[i_stim, i].errorbar([0], control.mean(),yerr=sem(control, nan_policy='omit'), fmt='none', ecolor='black', alpha=0.5, capsize=5)
+            ax[i_stim, i].errorbar([1], rd1.mean(), yerr=sem(rd1, nan_policy='omit'), fmt='none', ecolor='firebrick',alpha=0.5, capsize=5)
+            ax[i_stim, i].errorbar([2], opto.mean(), yerr=sem(opto, nan_policy='omit'), fmt='none', ecolor='blue',alpha=0.5, capsize=5)
+
+            # if stim == 'SFxO':
+            #     ax[i_stim, i].bar(np.array([3]), gnat.mean(), color='pink', alpha=0.3, label='GNAT')
 
             #screen_label = 'regular monitor' if 'big' in screen else 'ultrabright monitor'
             ax[i_stim, i].set_title(f'{"FFF" if "chirps" in stim else "SFxO"} ({"regular monitor" if "big" in screen else "ultrabright monitor"})')
 
             # if i == 0:
             #     ax[i_stim, i].set_ylabel('Proportion of responsive cells (%)')
-            ax[i_stim, i].set_xticks(np.array([0,1,2]))
+            # if stim == 'SFxO':
+            #     ax[i_stim, i].set_xticks(np.array([0,1,2,3]))
+            #     ax[i_stim, i].set_xticklabels(['Control', 'RD1', 'Opto', 'GNAT'])
+            # else:
+            ax[i_stim, i].set_xticks(np.array([0, 1, 2]))
             ax[i_stim, i].set_xticklabels(['Control', 'RD1', 'Opto'])
 
     fig.text(0.04, 0.5, 'Proportion of responsive cells (%)', va='center', rotation='vertical', fontsize=12)
-
-    #plt.tight_layout()
-    #plt.legend()
     plt.savefig(os.path.join(object.save_path, '% responsive cells'))
     plt.show()
+
+def split (arr, n_shuffles = 50):
+    '''
+    :param arr: shape n_repeats, n_cells, n_timepoints
+    :return:
+    '''
+    n_repeats = arr.shape[0]
+    n_cells, n_timepoints = arr.shape[-2], arr.shape[-1]
+    half = n_repeats //2
+
+    # true split
+    half1, half2 = np.reshape(arr[:half], (-1, n_cells, n_timepoints)),  np.reshape(arr[half:], (-1, n_cells, n_timepoints))
+    print(half1.shape, half2.shape)
+    #half1, half2 = arr[:half].mean(axis=0), arr[half:].mean(axis=0)
+
+    # true_corrs = np.array([
+    #     pearsonr(half1[c], half2[c])[0]
+    #     for c in range(n_cells)
+    # ])
+
+# split (data_object.dat['EC_GCaMP6s_06']['20241113']['big100_chirp_000_001']['zscored_matrix_baseline'])
+# split (data_object.dat['EC_GCaMP6s_06']['20240925']['big100_SFxO_000_001']['zscored_matrix_baseline'])
+
+
+def responsive_cells_amplitude (object):
+
+    stims = ['chirps', 'SFxO']
+    screens = ['big', 'small']
+    fig, ax = plt.subplots(2, 2, sharey = True, figsize=(5, 8))
+    def pop_data (object, group, stim, screen):
+        if stim == 'SFxO':
+            g = np.array(list(chain.from_iterable(
+                [object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis=(0, 1, 2))[
+                     object.dat[animal][day][sub_file]['thresholded_cells'] == 1].max(axis=-1).mean()
+                 for sub_file in object.dat[animal][day].keys() if
+                 ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+        elif stim == 'chirps':
+            g = np.array(list(chain.from_iterable(
+                [object.dat[animal][day][sub_file]['zscored_matrix_baseline'].mean(axis=0)[
+                     object.dat[animal][day][sub_file]['thresholded_cells'] == 1].max(axis=-1).mean()
+                 for sub_file in object.dat[animal][day].keys() if
+                 ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+        return g
+
+    for i_stim, stim in enumerate(stims):
+        for i, screen in enumerate(screens):
+            # average response across recordings, repeats, across cells
+            opto = pop_data(object, 'MWopto', stim, screen)
+            rd1 = pop_data(object, 'RD1', stim, screen)
+            control = pop_data(object, 'GCaMP6s', stim, screen)
+
+            print(stim, screen, opto, rd1, control)
+
+            # if stim == 'SFxO':
+            #     gnat = np.array(list(chain.from_iterable(
+            #         [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
+            #          for sub_file in object.dat[animal][day].keys() if ((screen in sub_file) and ('l4' not in sub_file))]
+            #         for animal in object.dat.keys() if ('GNAT' in animal)
+            #         for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+            #
+            #     print(gnat)
+            # is there a statistically sig diff in the distributions of the three groups?
+            stat, p = kruskal(control, rd1, opto)
+            print(f'KW H-statistic: {stat:.3f}, p-value: {p:.3f}')
+
+            if p < 0.05: # follow up with testing pairwise comparisons (with correction for multiple comparisons)
+                # Do pairwise comparisons manually:
+                print('mannwhitney two-sided test, with bonferroni multiple comparison correction')
+                pvals = [
+                    mannwhitneyu(control, rd1, alternative='two-sided').pvalue,
+                    mannwhitneyu(control, opto, alternative='two-sided').pvalue,
+                    mannwhitneyu(rd1, opto, alternative='two-sided').pvalue
+                ]
+
+                # Apply Bonferroni correction manually (3 comparisons):
+                _, pvals_corrected, _, _ = multipletests(pvals, alpha=0.05, method='bonferroni')
+
+                print(pvals_corrected)
+
+                # Define comparisons in same order as pvals
+                comparisons = [
+                    ('GCaMP6s', 'rd1'),
+                    ('GCaMP6s', 'opto'),
+                    ('rd1', 'opto')
+                ]
+
+                # Coordinates for group positions on x-axis
+                group_coords = {'GCaMP6s': 0, 'rd1': 1, 'opto': 2}
+                max_val = max(np.max(control), np.max(rd1), np.max(opto)) * 1.05
+                step = max_val * 0.05  # vertical spacing between significance bars
+                h = max_val
+
+                # Loop through each comparison and plot if significant
+                for (group1, group2), p_val in zip(comparisons, pvals_corrected):
+                    if p_val < 0.05:
+                        x1, x2 = group_coords[group1], group_coords[group2]
+                        y = h
+                        h += step  # update height for next line if needed
+
+                        # Decide number of stars
+                        if p_val < 0.001:
+                            stars = '***'
+                        elif p_val < 0.01:
+                            stars = '**'
+                        else:
+                            stars = '*'
+
+                        # Draw the line and stars
+                        ax[i_stim, i].plot([x1, x1, x2, x2], [y, y + step / 2, y + step / 2, y], lw=1.5, c='k')
+                        ax[i_stim, i].text((x1 + x2) * 0.5, y + step * 0.6, stars,
+                                           ha='center', va='bottom', fontsize=14)
+
+            ax[i_stim, i].scatter(np.array([0] * len(control)), control, s = 35, color = 'grey', alpha = 0.45, label = 'control')
+            ax[i_stim, i].scatter(np.array([1] * len(rd1)), rd1, s = 35, color = 'firebrick', alpha = 0.45, label = 'RD1')
+            ax[i_stim, i].scatter(np.array([2] * len(opto)), opto,s = 35, color = 'blue', alpha = 0.45, label = 'opto')
+            # if stim == 'SFxO':
+            #     ax[i_stim, i].scatter(np.array([3] * len(gnat)), gnat, s=65, color='pink', alpha=0.6, label='GNAT')
+
+            ax[i_stim, i].bar(np.array([0]), np.nanmean(control), color = 'grey', alpha = 0.3, label = 'control')
+            ax[i_stim, i].bar(np.array([1]), np.nanmean(rd1), color = 'firebrick', alpha = 0.3, label = 'RD1')
+            ax[i_stim, i].bar(np.array([2]), np.nanmean(opto), color = 'blue', alpha = 0.3, label = 'opto')
+            # if stim == 'SFxO':
+            #     ax[i_stim, i].bar(np.array([3]), gnat.mean(), color='pink', alpha=0.3, label='GNAT')
+
+            #screen_label = 'regular monitor' if 'big' in screen else 'ultrabright monitor'
+            ax[i_stim, i].set_title(f'{"FFF" if "chirps" in stim else "SFxO"} ({"regular monitor" if "big" in screen else "ultrabright monitor"})')
+
+            # if i == 0:
+            #     ax[i_stim, i].set_ylabel('Proportion of responsive cells (%)')
+            # if stim == 'SFxO':
+            #     ax[i_stim, i].set_xticks(np.array([0,1,2,3]))
+            #     ax[i_stim, i].set_xticklabels(['Control', 'RD1', 'Opto', 'GNAT'])
+            # else:
+            ax[i_stim, i].set_xticks(np.array([0, 1, 2]))
+            ax[i_stim, i].set_xticklabels(['Control', 'RD1', 'Opto'])
+
+    fig.text(0.04, 0.5, 'Response amplitude', va='center', rotation='vertical', fontsize=12)
+    plt.savefig(os.path.join(object.save_path, 'response amplitude'))
+    plt.show()
+
+
+
+def responsive_cells_hist_gnat (object):
+
+    stims = ['chirps', 'O']
+    screens = ['big', 'small']
+    fig, ax = plt.subplots(2, 2, sharey = True, figsize=(6, 8))
+
+    for i_stim, stim in enumerate(stims):
+        print(stim)
+        for i, screen in enumerate(screens):
+            print(screen)
+
+            if stim == 'chirps':
+                # average response across recordings, repeats, across cells
+                control = np.array(list(chain.from_iterable(
+                    [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
+                     for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                    for animal in object.dat.keys() if ('GCaMP6s' in animal)
+                    for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+
+                gnat = np.array(list(chain.from_iterable(
+                    [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
+                     for sub_file in object.dat[animal][day].keys() if ((stim in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                    for animal in object.dat.keys() if ('GNAT' in animal)
+                    for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+
+            else:
+                # average response across recordings, repeats, across cells
+                control = np.array(list(chain.from_iterable(
+                    [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
+                     for sub_file in object.dat[animal][day].keys() if (('chirps' not in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                    for animal in object.dat.keys() if ('GCaMP6s' in animal)
+                    for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+
+                gnat = np.array(list(chain.from_iterable(
+                    [100*object.dat[animal][day][sub_file]['thresholded_cells'].sum()/len(object.dat[animal][day][sub_file]['thresholded_cells'])
+                     for sub_file in object.dat[animal][day].keys() if (('chirps' not in sub_file) and (screen in sub_file) and ('l4' not in sub_file))]
+                    for animal in object.dat.keys() if ('GNAT' in animal)
+                    for day in object.dat[animal].keys() if (day in object.dict_animals_days[animal]))))
+
+            print('c', control)
+            print('g',gnat)
+            ax[i_stim, i].scatter(np.array([0] * len(control)), control, s = 65, color = 'grey', alpha = 0.6, label = 'control')
+            ax[i_stim, i].scatter(np.array([1] * len(gnat)), gnat, s=65, color='pink', alpha=0.6, label='GNAT')
+            ax[i_stim, i].bar(np.array([0]), control.mean(), color = 'grey', alpha = 0.3, label = 'control')
+            ax[i_stim, i].bar(np.array([1]), gnat.mean(), color='pink', alpha=0.3, label='GNAT')
+
+            #screen_label = 'regular monitor' if 'big' in screen else 'ultrabright monitor'
+            ax[i_stim, i].set_title(f'{"FFF" if "chirps" in stim else "SFxO"} ({"regular monitor" if "big" in screen else "ultrabright monitor"})')
+            ax[i_stim, i].set_xticks(np.array([0, 1]))
+            ax[i_stim, i].set_xticklabels(['Control', 'GNAT'])
+
+    fig.text(0.04, 0.5, 'Proportion of responsive cells (%)', va='center', rotation='vertical', fontsize=12)
+    plt.savefig(os.path.join(object.save_path, '% responsive cells gnat'))
+    plt.show()
+
 
 def responsive_cells_project (object, project = 'RD1'):
     '''
@@ -511,7 +823,7 @@ def hist_osi_angle (obj, animal, day, session):
     with PdfPages(os.path.join(obj.save_path, 'histogram', animal,f'{animal} OSI_PD histogram ({day}, {session}).pdf')) as pdf:
         fig, ax = plt.subplots(ncols = 2, figsize = (6,5))
 
-        ax[0].hist(obj.dat[animal][day][session]['pref_orientation'], color =  'r', alpha = 0.5, label = f'Cell count, {day}', bins = np.linspace(-180,180,25))
+        ax[0].hist(obj.dat[animal][day][session]['preferred_orientation'], color =  'r', alpha = 0.5, label = f'Cell count, {day}', bins = np.linspace(-180,180,25))
         ax[1].hist(obj.dat[animal][day][session]['OSI'], color =  'b', alpha = 0.5, label = f'Cell count, {day}', bins = np.linspace(0,1,25))
 
         # ax[i,0].set_ylim([0, 6])
@@ -529,9 +841,10 @@ def hist_osi_angle (obj, animal, day, session):
         plt.suptitle(f'{animal}, {day}, {session}')
 
         plt.tight_layout()
+        plt.show()
         pdf.savefig()
-        if not obj.show_plots:
-            plt.close()
+        # if not obj.show_plots:
+        #     plt.close()
 
 
 def sf_tuning_curves(obj, animal, day, session, amplitude_curve_SFs, sorted_sfs_arr):
@@ -616,4 +929,251 @@ def sf_tf_tuning_curves(obj, animal, day, session, sorted_sfs_arr, sorted_tfs_ar
 
 #parameter_matrix_plot(data_object, 'EC_GCaMP6s_09', '20241122', 'small_SFxO_000_012')
 
+def polar_plots(object, animal, day, subfile, n_cells_plot = 32, zscore_threshold = 3):
+
+    if ((object.dat[animal][day][subfile]['n_theta'] != 1) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
+        cells_to_plot = np.arange(n_cells_plot)
+
+        # param_matrix: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
+        param_matrix, thetas, sfs, tfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
+
+        # shape ((n_cells)) > index of preferred spatial frequency
+        preferred_sf = pref_sf(object, param_matrix)
+
+        colors = plt.cm.plasma(np.linspace(0, 0.9, len(sfs) * len(thetas)))
+        colors_cells = plt.cm.plasma(np.linspace(0, 0.9, n_cells_plot))
+
+        #zscore_threshold_cells = object.dat[animal][day][subfile]['thresholded_cells'] #zscore_thresholding(object, animal, day, subfile, zscore_threshold = zscore_threshold)
+
+        _, tuning_curves_sf_pref, (complex_sf_pref, osi_sf_pref, pref_orientation_sf_pref), (_,_,_), _, = complex_phase(object, animal, day, subfile, sf_i=preferred_sf)
+
+        if (object.dat[animal][day][subfile]['n_SF'] > 1) and (object.dat[animal][day][subfile]['n_theta'] > 1):
+            if not os.path.exists(os.path.join(object.save_path, 'polar tuning curve', animal)):
+                os.makedirs(os.path.join(object.save_path, 'polar tuning curve', animal))
+
+            n_rows = 4
+            n_cols = int(np.ceil(n_cells_plot / n_rows))
+            fig, ax = plt.subplots(nrows= n_rows, ncols=n_cols, subplot_kw={'projection': 'polar'}, figsize=(18, 9))
+            ax = ax.ravel()
+            for cell_i in cells_to_plot:
+
+                # average across repeats
+                rmax = np.array((build_tuning_curves(object, animal, day, subfile, avg_over_param=None, sf_i=preferred_sf)[1][:, :, cell_i])).max()
+
+                # we want to look at tuning of a specific sf
+                # shape ((n_repeats, n_orientation, cells))
+                _, response_sf, _ = build_tuning_curves(object, animal, day, subfile, avg_over_param=None, sf_i=preferred_sf)
+                (_, osi, _), (_, dsi, _) = complex_phase_from_tuning(response_sf, thetas)
+
+                # r = vector of responses for each direction(response vector)
+                r = response_sf[:, :, cell_i].mean(axis=0)
+                r_repeats = response_sf[:, :, cell_i]
+                r /= rmax
+                r_repeats /= rmax
+                #r /= r.sum()  # normalizing responses so they're between 0 and 1
+                theta = np.deg2rad(thetas)
+
+                # to join the last point and first point
+                idx = np.arange(r.shape[0] + 1)
+                idx[-1] = 0
+                if 'GCaMP6s' in animal:
+                    colour = 'black'
+                elif 'RD1' in animal:
+                    colour = 'red'
+                elif 'MWopto' in animal:
+                    colour = 'blue'
+                idx = np.arange(r.shape[0] + 1)
+                idx[-1] = 0
+                ax[cell_i].plot(theta, r, linewidth=2, color=colour,
+                              alpha=0.8, zorder =10)  # , color=scalarMap.to_rgba(cell), alpha=0.6)
+                ax[cell_i].plot(theta[idx], r[idx], linewidth=2, color=colour,
+                              alpha=0.8, zorder =10)  # , color=scalarMap.to_rgba(cell), alpha=0.6)
+
+                for i in range(r_repeats.shape[0]):
+                    idx = np.arange(r_repeats[i].shape[0] + 1)
+                    idx[-1] = 0
+                    ax[cell_i].plot(theta, r_repeats[i], linewidth=1, color='grey',
+                                  alpha=0.4)  # , color=scalarMap.to_rgba(cell), alpha=0.6)
+                    ax[cell_i].plot(theta[idx], r_repeats[i][idx], linewidth=1, color='grey',
+                                  alpha=0.4)  # , color=scalarMap.to_rgba(cell), alpha=0.6)
+                ax[cell_i].set_thetagrids([0, 90, 180, 270], y=0.15,
+                                        labels=['0', '\u03c0' + '/2', '\u03c0', '3' + '\u03c0' + '/2'],
+                                        fontsize=8)  # labels = ['0', '','\u03c0','']
+                ax[cell_i].set_rlabel_position(45)  # r is normalized response
+                #polar_ax.set_rticks([np.round(r.max(), 1)])
+                ax[cell_i].set_rticks([])
+                ax[cell_i].set_rmax(1)
+                ax[cell_i].grid(True)
+
+            if object.dat[animal][day][subfile]['thresholded_cells'][cell_i]:
+                ax[cell_i].set_title(f'Cell {cell_i} \nOSI: {np.round(osi[cell_i], 2)}, DSI: {np.round(dsi[cell_i], 2)}', fontsize = 10, color = 'green', fontweight = 'bold')
+            else:
+                ax[cell_i].set_title(f'Cell {cell_i} \nOSI: {np.round(osi[cell_i], 2)}, DSI: {np.round(dsi[cell_i], 2)}', fontsize=10, color='r')
+        plt.tight_layout()
+        plt.savefig(os.path.join(object.save_path, 'polar tuning curve', animal,
+                                 f'{animal} polar tuning curve ({day}, {subfile}).pdf'))
+        plt.savefig(os.path.join(object.save_path, 'polar tuning curve', animal,
+                                 f'{animal} polar tuning curve ({day}, {subfile}).svg'))
+        plt.show()
+
+
+def tuning_curves(object, animal, day, subfile, n_cells_plot = 36, zscore_threshold = 3):
+
+    if ((object.dat[animal][day][subfile]['n_theta'] != 1) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
+        cells_to_plot = np.arange(n_cells_plot)
+
+        # param_matrix: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
+        param_matrix, thetas, sfs, tfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
+
+        # shape ((n_cells)) > index of preferred spatial frequency
+        preferred_sf = pref_sf(object, param_matrix)
+
+        colors = plt.cm.plasma(np.linspace(0, 0.9, len(sfs) * len(thetas)))
+        colors_cells = plt.cm.plasma(np.linspace(0, 0.9, n_cells_plot))
+
+        #zscore_threshold_cells = object.dat[animal][day][subfile]['thresholded_cells'] #zscore_thresholding(object, animal, day, subfile, zscore_threshold = zscore_threshold)
+
+        _, tuning_curves_sf_pref, (complex_sf_pref, osi_sf_pref, pref_orientation_sf_pref), (_,_,_), _, = complex_phase(object, animal, day, subfile, sf_i=preferred_sf)
+
+        if (object.dat[animal][day][subfile]['n_SF'] > 1) and (object.dat[animal][day][subfile]['n_theta'] > 1):
+            if not os.path.exists(os.path.join(object.save_path, 'tuning curve', animal)):
+                os.makedirs(os.path.join(object.save_path, 'tuning curve', animal))
+
+            n_rows = 6
+            n_cols = int(np.ceil(n_cells_plot / n_rows))
+            fig, ax = plt.subplots(nrows= n_rows, ncols=n_cols, figsize=(18, 9))
+            ax = ax.ravel()
+            #for i, cell_i in enumerate(np.argwhere(object.dat[animal][day][subfile]['thresholded_cells']==1)[:,0][:n_cells_plot]):
+            for i, cell_i in enumerate(np.arange(n_cells_plot)):
+
+                # average across repeats
+                rmax = np.array((build_tuning_curves(object, animal, day, subfile, avg_over_param=None, sf_i=preferred_sf)[1][:, :, cell_i])).max()
+
+                # we want to look at tuning of a specific sf
+                # shape ((n_repeats, n_orientation, cells))
+                _, response_sf, _ = build_tuning_curves(object, animal, day, subfile, avg_over_param=None, sf_i=preferred_sf)
+                (_, osi, _), (_, dsi, _) = complex_phase_from_tuning(response_sf, thetas)
+
+                # r = vector of responses for each direction(response vector)
+                r = response_sf[:, :, cell_i].mean(axis=0)
+                r_repeats = response_sf[:, :, cell_i]
+                r /= rmax
+                r_repeats /= rmax
+                #r /= r.sum()  # normalizing responses so they're between 0 and 1
+                theta = thetas #np.deg2rad(thetas)
+
+                # to join the last point and first point
+                if 'GCaMP6s' in animal:
+                    colour = 'black'
+                elif 'RD1' in animal:
+                    colour = 'firebrick'
+                elif 'MWopto' in animal:
+                    colour = 'blue'
+
+                ax[i].plot(theta, r, linewidth=2, color=colour,
+                              alpha=0.8, zorder =10)  # , color=scalarMap.to_rgba(cell), alpha=0.6)
+
+                for i_repeat in range(r_repeats.shape[0]):
+                    ax[i].plot(theta, r_repeats[i_repeat], linewidth=1, color='grey',
+                                  alpha=0.4)  # , color=scalarMap.to_rgba(cell), alpha=0.6)
+
+                # ax[cell_i].set_thetagrids([0, 90, 180, 270], y=0.15,
+                #                         labels=['0', '\u03c0' + '/2', '\u03c0', '3' + '\u03c0' + '/2'],
+                #                         fontsize=8)  # labels = ['0', '','\u03c0','']
+                #ax[cell_i].set_rlabel_position(45)  # r is normalized response
+                #polar_ax.set_rticks([np.round(r.max(), 1)])
+                # ax[cell_i].set_rticks([])
+                # ax[cell_i].set_rmax(1)
+                # ax[cell_i].grid(True)
+
+                ax[i].set_xticks([0, 90, 180, 270])
+
+                if object.dat[animal][day][subfile]['thresholded_cells'][cell_i]:
+                    ax[i].set_title(f'Cell {cell_i} \nOSI: {np.round(osi[cell_i], 2)}, DSI: {np.round(dsi[cell_i], 2)}', fontsize = 10, color = 'green', fontweight = 'bold')
+                else:
+                    ax[i].set_title(f'Cell {cell_i} \nOSI: {np.round(osi[cell_i], 2)}, DSI: {np.round(dsi[cell_i], 2)}', fontsize=10, color='r')
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(object.save_path, 'tuning curve', animal,
+                                 f'{animal} tuning curve ({day}, {subfile}).pdf'))
+        plt.savefig(os.path.join(object.save_path, 'tuning curve', animal,
+                                 f'{animal} tuning curve ({day}, {subfile}).svg'))
+        plt.show()
+
+
+
+def tuning_curves_aligned(object, animal, day, subfile):
+
+    if ((object.dat[animal][day][subfile]['n_theta'] != 1) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
+        # param_matrix: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
+        param_matrix, thetas, sfs, tfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
+
+        # shape ((n_cells)) > index of preferred spatial frequency
+        preferred_sf = pref_sf(object, param_matrix)
+
+        _, tuning_curves_sf_pref, _ = build_tuning_curves(object, animal, day, subfile, zscore = False, avg_over_param = None, sf_i=preferred_sf)
+
+        tuning_curves_sf_pref_mean = tuning_curves_sf_pref.mean(axis = 0)
+
+        # for each cell, take the angle which yields the max mean response as the best angle index
+        max_theta_idx = np.argmax(tuning_curves_sf_pref.mean(axis=0), axis=0) # shape n_ cells
+
+        aligned_tuning_curves = np.stack([np.roll(tuning_curves_sf_pref_mean[:, i], (len(thetas) // 2) - max_theta_idx[i]) for i in range(tuning_curves_sf_pref_mean.shape[1])], axis=1)
+
+        # normalize to max response
+        #aligned_tuning_curves /= aligned_tuning_curves.max(axis = 0)
+
+        # only return thresholded cells
+        return aligned_tuning_curves[:, object.dat[animal][day][subfile]['thresholded_cells']]
+
+def tuning_curves_aligned_groups(object):
+    def get_group_dat (group):
+        group_dat = np.concatenate(
+            list(chain.from_iterable(
+                [tuning_curves_aligned(object, animal, day, sub_file)
+                 for sub_file in object.dat[animal][day].keys()
+                 if 'SFxO' in sub_file and 'big100' in sub_file]
+                for animal in object.dat.keys() if group in animal
+                for day in object.dat[animal].keys()
+            )), axis=1)  # concatenate across cells
+        return group_dat
+
+    # tuning curve for all cells > shape n_ori, n_cells
+    control = get_group_dat('GCaMP6s')
+    rd1 = get_group_dat('RD1')
+    opto = get_group_dat('MWopto')
+
+    # After loading your tuning curves...
+    global_max = max(control.max(), rd1.max(), opto.max())
+
+    # Normalize all curves using the same reference max
+    control /= global_max
+    rd1 /= global_max
+    opto /= global_max
+
+    control = 0.5 * (control + np.roll(control, shift=control.shape[0] // 2, axis=0))
+    rd1 = 0.5 * (rd1 + np.roll(rd1, shift=rd1.shape[0] // 2, axis=0))
+    opto = 0.5 * (opto + np.roll(opto, shift=opto.shape[0] // 2, axis=0))
+
+    control_mean, control_sem = control.mean(axis=1), sem(control, axis=1)
+    rd1_mean, rd1_sem = rd1.mean(axis=1), sem(rd1, axis=1)
+    opto_mean, opto_sem = opto.mean(axis=1), sem(opto, axis=1)
+
+    plt.figure()
+    plt.plot(control_mean, c = 'black')
+    plt.plot(rd1_mean, c='red')
+    plt.plot(opto_mean, c='blue')
+
+    plt.fill_between(np.arange(len(control_mean)), control_mean - control_sem, control_mean + control_sem, color='black', alpha=0.3, label='Sighted')
+    plt.fill_between(np.arange(len(rd1_mean)), rd1_mean - rd1_sem, rd1_mean + rd1_sem, color='red', alpha=0.3, label='rd1')
+    plt.fill_between(np.arange(len(opto_mean)), opto_mean - opto_sem, opto_mean + opto_sem, color='blue', alpha=0.3, label='rd1:MWopto')
+
+    #plt.xticks(np.arange(8), ['-135°', '-90°', '-45°', '0°', '45°', '90°', '135°', '180°'])
+    plt.xticks(np.arange(8), ['-180°', '-135°', '-90°', '-45°', '0°', '45°', '90°', '135°'])
+
+    plt.xlabel('Orientation offset (aligned to preferred)')
+    plt.legend()
+    plt.ylabel('Normalized response')
+    plt.tight_layout()
+    plt.show()
 

@@ -667,15 +667,31 @@ def on_off_scores (object, animal, day, session):
 
     return on_off_index
 
+def find_threshold_crossing(signal, threshold, time_axis):
+    """Finds the first time point where signal crosses the threshold."""
+    idx = np.where(signal >= threshold)[0]
+    return time_axis[idx[0]] if len(idx) > 0 else 0
+
 def response_speed (object, animal, day, session):
     # dont' use z score responses becuase responses need to be positive
     # grab portion of the response during the white FFF, mean across repeats
+    # shape (n_cells, n_timepoints)
     arr = object.dat[animal][day][session]['zscored_matrix_baseline'][:,:, object.fps*8:object.fps*12].mean(axis = 0)
 
-    # this is the frame where the response hits its peak during white FFF
-    max_response_idx = np.argmax(arr, axis = 1)
+    R_max = arr.max(axis = 1)                               # max response for each cell
+    threshold_10, threshold_90 = 0.1 * R_max, 0.9 * R_max   # 10% and 90% thresholds
 
-    return max_response_idx
+    time_axis = np.arange(arr.shape[1])  # time axis  (n_timepoints,)
+
+    # Find crossing times for each cell
+    t_10 = np.array([find_threshold_crossing(arr[i, :], threshold_10[i], time_axis) for i in range(arr.shape[0])])
+    t_90 = np.array([find_threshold_crossing(arr[i, :], threshold_90[i], time_axis) for i in range(arr.shape[0])])
+
+    # Compute slope (change in response over time)
+    response_speed = (threshold_90 - threshold_10) / (t_90 - t_10)
+    response_speed[np.isinf(response_speed)] = -1
+
+    return response_speed
 
 def response_amplitude (object, animal, day, session):
     # dont' use z score responses becuase responses need to be positive
@@ -694,7 +710,14 @@ def save_fig (object, folder_title, figure_title):
     plt.savefig(os.path.join(folder_path, f'{figure_title}.png'))
     plt.savefig(os.path.join(folder_path, f'{figure_title}.svg'))
 
+from datetime import datetime, timedelta
 def calculate_animal_age(dob, imaging_date):
+    '''
+    Returns the age of the animal born on DOB, on imaging_date (in post-natal days, and weeks)
+    :param dob: format 'YYYY/MM/DD'
+    :param imaging_date: 'YYYY/MM/DD'
+    :return:
+    '''
     # Convert input strings to date objects
     dob = datetime.strptime(dob, "%Y/%m/%d")
     imaging_date = datetime.strptime(imaging_date, "%Y/%m/%d")
@@ -707,6 +730,22 @@ def calculate_animal_age(dob, imaging_date):
     days = age_in_days % 7
 
     return f"P {age_in_days} ({weeks} weeks + {days} days)"
+
+def calculate_day_animal_age(dob, target_postnatal_day):
+    '''
+    Returns day that the animal born on DOB will be of age target_postnatal_day
+    :param dob: format 'YYYY/MM/DD'
+    :param target_postnatal_day: INT
+    :return:
+    '''
+    # Convert input strings to date objects
+    dob = datetime.strptime(dob, "%Y/%m/%d")
+    formatted_dob = dob.strftime("%Y/%m/%d")
+
+    dob_plus_target = dob + timedelta(days=target_postnatal_day)
+    formatted_date = dob_plus_target.strftime("%Y/%m/%d")
+
+    print( f"Animal born on {formatted_dob} will be P{target_postnatal_day} on {formatted_date})")
 
 # def os_tuning(obj, animal, day, sub_file):
 #     '''
@@ -801,6 +840,7 @@ def build_parameter_matrix(object, animal, day, subfile, response_window = 'whol
     :return:
     '''
 
+    # 1 spatial frequency and 8 orientations
     if (object.dat[animal][day][subfile]['n_SF'] == 1) and (object.dat[animal][day][subfile]['n_TF'] == 1):
 
         # each of shape (n_repeats, x nORI) > parameters for stimuli shown for each repeat
@@ -844,14 +884,15 @@ def build_parameter_matrix(object, animal, day, subfile, response_window = 'whol
 
         return responses_ordered, thetas
 
-    else:
+    # SFxO
+    elif object.dat[animal][day][subfile]['n_TF'] == 1:
 
         # each of shape (n_repeats, nSF x nORI) > parameters for stimuli shown for each repeat
         sfs_stim = object.dat[animal][day][subfile]['SFs']
+        tfs_stim = object.dat[animal][day][subfile]['TFs']
         thetas_stim = object.dat[animal][day][subfile]['thetas']
 
-        sfs = np.unique(sfs_stim)
-        thetas = np.unique(thetas_stim)
+        sfs, tfs, thetas = np.unique(sfs_stim), np.unique(tfs_stim), np.unique(thetas_stim)
 
         # dictionary - 1 key per repeat. each repeat contains array of shape (nSF x nOri, timepoints)
         if response_window == 'whole':      # 1s wait + 1s static + 3s moving + 1s wait
@@ -889,7 +930,52 @@ def build_parameter_matrix(object, animal, day, subfile, response_window = 'whol
         # store in object
         object.dat[animal][day][subfile][f'param_matrix_{response_window}{zscore*"_zscore"}'] = responses_ordered
 
-        return responses_ordered, thetas, sfs
+        return responses_ordered, thetas, sfs, tfs
+
+    # SFxTF (only 1 orientation)
+    elif object.dat[animal][day][subfile]['n_theta'] == 1:
+
+        # each of shape (n_repeats, nSF x nORI) > parameters for stimuli shown for each repeat
+        sfs_stim = object.dat[animal][day][subfile]['SFs']
+        tfs_stim = object.dat[animal][day][subfile]['TFs']
+        thetas_stim = object.dat[animal][day][subfile]['thetas']
+
+        sfs, tfs, thetas = np.unique(sfs_stim), np.unique(tfs_stim), np.unique(thetas_stim)
+
+        # dictionary - 1 key per repeat. each repeat contains array of shape (nSF x nOri, timepoints)
+        if response_window == 'whole':      # 1s wait + 1s static + 3s moving + 1s wait
+            if zscore:
+                responses_ttls = object.dat[animal][day][subfile]['zscored_responses_ttls_whole']
+            else:
+                responses_ttls = object.dat[animal][day][subfile]['responses_ttls_whole']
+        elif response_window == 'moving':   # 3s moving
+            if zscore:
+                responses_ttls = object.dat[animal][day][subfile]['zscored_responses_ttls']
+            else:
+                responses_ttls = object.dat[animal][day][subfile]['responses_ttls']
+
+        # array shape (n_repeats, nSF x nORI, n_cells, timepoints)
+        gratings_responses = np.array([responses_ttls[key] for key in responses_ttls.keys() if 'Grating' in key])
+
+        n_repeats, cells, timepoints = gratings_responses.shape[0], gratings_responses.shape[2], gratings_responses.shape[-1]
+        n_sf, n_tf = len(sfs), len(tfs)
+
+        # the reordered array> contains response matrix for each repeat, with sorted orientation and SF
+        responses_ordered = np.zeros((n_repeats, n_sf, n_tf, cells, timepoints))
+
+        for i_repeat in range(n_repeats):
+            for i_sf, sf in enumerate(sfs):
+                for i_tf, tf in enumerate(tfs):
+                    # find where this sf/orientation combination exists in sfs_repeat and thetas_repeat
+                    idx = np.where((sfs_stim[i_repeat] == sf) & (tfs_stim[i_repeat] == tf))[0][0]
+
+                    # store response at this index
+                    responses_ordered[i_repeat, i_tf, i_sf] = gratings_responses[i_repeat, idx]
+
+        # store in object
+        object.dat[animal][day][subfile][f'param_matrix_{response_window}{zscore*"_zscore"}'] = responses_ordered
+
+        return responses_ordered, thetas, sfs, tfs,
 
 def pref_sf (object, parameter_matrix):
     '''
@@ -932,8 +1018,11 @@ def pref_theta (object, parameter_matrix):
 
     '''
     # average across repeats, then grab the response period (static+ 2 sec moving)
-    # shape (n_orientations, n_sf, n_cells, n_timepoints)
-    repeats_avg = parameter_matrix.mean(axis=0)[:, :, :, object.fps*2:object.fps*4]
+    # shape (n_orientations, n_sf, n_cells, n_timepoints) OR (n_orientations, n_cells, n_timepoints) (if o * repeat)
+    if parameter_matrix.ndim == 5:
+        repeats_avg = parameter_matrix.mean(axis=0)[:, :, :, object.fps*2:object.fps*4]
+    elif parameter_matrix.ndim == 4:
+        repeats_avg = parameter_matrix.mean(axis=0)[:, :, object.fps*2:object.fps*4]
 
     # sum across sf and time axis (to collapse high dimensional data) (result is shape (n_sf, n_cells))
     # then take the argmax across the theta axis
@@ -995,7 +1084,7 @@ def grating_response_amplitude (object, response_array):
                                                    for i_sf in range(n_sf)]
                                                    for i_ori in range(n_ori)])
 
-def zscore_thresholding (object, animal, day, subfile, zscore_threshold = 2):
+def zscore_thresholding (object, animal, day, subfile, zscore_threshold = 2, std_threshold = 1.5):
     '''
     Considering responses at the best 'sf', calculate a z score based on the baseline
     Determines which cells were responsive
@@ -1006,7 +1095,7 @@ def zscore_thresholding (object, animal, day, subfile, zscore_threshold = 2):
     :return:
     '''
     if 'chirp' not in subfile:
-
+        # 8 orientations x 6 repeats
         if (object.dat[animal][day][subfile]['n_SF'] == 1) and (object.dat[animal][day][subfile]['n_TF'] == 1):
             # since we're z scoring according to the baseline period, want to grab raw responses so we don't z score twice
             # shape n_repeats, n_ori, n_cells, timepoints
@@ -1017,31 +1106,71 @@ def zscore_thresholding (object, animal, day, subfile, zscore_threshold = 2):
             baseline_mean = parameter_matrix[...,:object.fps].mean(axis = (0,1,-1), keepdims = True)
             baseline_std = parameter_matrix[...,:object.fps].std(axis = (0,1,-1), keepdims = True)
 
-        else:
-            # since we're z scoring according to the baseline period, want to grab raw responses so we don't z score twice
-            parameter_matrix, _, _ = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=False)
+            # z score the response, and then average across repeats (shape = ((n_repeats, n_ori, n_cells, n_timepoints)
+            z_scored_response = ((parameter_matrix - baseline_mean) / baseline_std)
+            # n_repeats, n_ori, n_cells, n_timepoints
 
+            # cell-by-cell threshold : first second of the response (baseline period) > std over orientations, repeats and timepoints > multiply each cell by 1.5
+            # shape n_cells
+            cell_threshold = z_scored_response[..., :object.fps].std(axis=(0, 1, -1)) * std_threshold*(2/3)
+
+            # shape n_cells > take the z scored responses during the 'moving grating' period > average (n_ori, n_cells, n_timepoints) over orientations/repeats to get shape (n_cells)
+            #z_scored_response_mean = z_scored_response[..., object.fps * 2: object.fps * 5].mean(axis=(0,-1))
+            # shape (n_ori, n_cells)
+            z_scored_response_mean = z_scored_response[..., object.fps * 2: object.fps * 5].mean(axis=(0,-1))
+            z_scored_response_median = np.median(z_scored_response[..., object.fps * 2: object.fps * 5], axis=(0,-1))
+
+            # see if the mean response during moving exceeds the cell std threshold
+            #cell_exceeds_threshold = z_scored_response_mean > cell_threshold
+            # shape (n_ori, n_cells) > (n_cells)
+            cell_exceeds_threshold = (z_scored_response_mean > cell_threshold[None,:]).any(axis=0) & (
+                        z_scored_response_median > cell_threshold[None,:] * 0.4).any(axis=0)
+
+        else: #SFxO or SFx TF
+            # since we're z scoring according to the baseline period, want to grab raw responses so we don't z score twice
+            # either shape (n_repeats, n_ori, n_SF, n_cells, n_timepoints) or (n_repeats, n_SF, n_TF, n_cells, n_timepoints)
+            parameter_matrix, _, _, _ = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=False)
+
+            # both shape n_cells
             # take first second of response (baseline) > mean/std across time/orientation/repeat axis > shape (n_cells)
             # we can assume that we have consistent baselines across repeats and orientations
             baseline_mean = parameter_matrix[...,:object.fps].mean(axis = (0,1,2,-1), keepdims = True)
             baseline_std = parameter_matrix[...,:object.fps].std(axis = (0,1,2,-1), keepdims = True)
 
-        # z score the response, and then average across repeats (shape = ((n_repeats, n_ori, n_sf n_cells, n_timepoints)
-        z_scored_response = ((parameter_matrix - baseline_mean) / baseline_std)
+            # either shape (n_repeats, n_ori, n_SF, n_cells, n_timepoints) or (n_repeats, n_SF, n_TF, n_cells, n_timepoints)
+            # z score the response, and then average across repeats (shape = ((n_repeats, n_ori, n_sf n_cells, n_timepoints)
+            z_scored_response = ((parameter_matrix - baseline_mean) / baseline_std)
 
-        # take the z scored responses during the 'moving grating' period > average over repeats (shape = ((n_ori, n_sf (optional), n_cells, n_timepoints)
-        z_scored_response_mean = z_scored_response[..., object.fps * 2 : object.fps  * 5].mean(axis = 0)
-        z_scored_response_median = np.median(z_scored_response[..., object.fps * 2: object.fps * 5], axis=0)
+            # cell-by-cell threshold : first second of the response (baseline period) > std over orientations, SFs, repeats and timepoints > multiply each cell by 1.5
+            # shape n_cells
+            cell_threshold = z_scored_response[..., :object.fps].std(axis=(0, 1, 2, -1)) * std_threshold*(2/3)
 
-        if (object.dat[animal][day][subfile]['n_SF'] == 1) and (object.dat[animal][day][subfile]['n_TF'] == 1):
-            # see if the response at peak exceeds the zscore threshold (across any orientation, and timepoints)
-            cell_exceeds_threshold = ((z_scored_response_mean > zscore_threshold) & (z_scored_response_median > (zscore_threshold-1) )).any(axis=(0,-1))
-        else:
-            # see if the response at peak exceeds the zscore threshold (across any orientation, SF, and timepoints)
-            cell_exceeds_threshold = ((z_scored_response_mean > zscore_threshold) & (z_scored_response_median > (zscore_threshold-1) )).any(axis=(0,1,3))
+            # shape n_cells >  z scored responses during the 'moving grating' period > average over repeats (shape = n_cells)
+            #z_scored_response_mean = z_scored_response[..., object.fps * 2: object.fps * 5].mean(axis=(0,1,2,-1))
+            # take the z scored responses during the 'moving grating' period > average over repeats (shape = (n_ori, n_SF, n_cells) or (n_SF, n_TF, n_cells)
+            z_scored_response_mean = z_scored_response[..., object.fps * 2: object.fps * 5].mean(axis=(0,-1))
+            z_scored_response_median = np.median(z_scored_response[..., object.fps * 2: object.fps * 5], axis=(0,-1))
+
+            # cell_exceeds_threshold = ((z_scored_response_mean > zscore_threshold) & (
+            #             z_scored_response_median > (zscore_threshold - 1))).any(axis=(0, 1, 3))
+
+            #cell_exceeds_threshold = z_scored_response_mean > cell_threshold
+            # cell_exceeds_threshold = (z_scored_response_mean > cell_threshold[:, None]).any(axis=1) & (
+            #             z_scored_response_median > cell_threshold[:, None] * 0.9).any(axis=1)
+            #cell_exceeds_threshold = z_scored_response_mean > cell_threshold
+            # cell_exceeds_threshold = (z_scored_response_mean > cell_threshold[None, None, :, None]).any(axis=(0,1,-1)) & (
+            #             z_scored_response_median > cell_threshold[None, None,:, None] * 0.9).any(axis=(0,1,-1))
+
+            # # check if across all orientations (SFxO) or SF (SFxTF), mean response cell exceeds threshold
+            # cell_exceeds_threshold = (z_scored_response_mean.mean(axis = 1) > cell_threshold[None, :, None]).any(axis=(0,-1)) & (
+            #             z_scored_response_median.mean(axis = 1) > cell_threshold[None,:, None] * 0.3).any(axis=(0,-1))
+            #
+            # check if across all orientations (SFxO) or SF (SFxTF), mean response cell exceeds threshold
+            cell_exceeds_threshold = (z_scored_response_mean > cell_threshold[None, None, :]).any(axis=(0,1)) & (z_scored_response_median > cell_threshold[None, None,:] * 0.4).any(axis=(0,1))
 
     else: # full-field flash
         # exclude first repeat
+        # shape n_repeats, n_cells, n_timepoints
         response_matrix = object.dat[animal][day][subfile]['responses_ttls'][1:] # shape n_repeats, cells, timepoints
 
         # take first 4sec of response (baseline) > mean/std across time/repeat axis > shape (n_cells)
@@ -1052,13 +1181,20 @@ def zscore_thresholding (object, animal, day, subfile, zscore_threshold = 2):
         # z score the response, and then average across repeats (shape = ((n_repeats, n_cells, n_timepoints)
         z_scored_response = ((response_matrix - baseline_mean) / baseline_std)
 
-        # take the z scored responses during the 'ON' period > average over repeats (shape = ((n_cells, n_timepoints)
-        # 0-4 = grey, 4-8 = black, 8-12 = white, 12-16 = black, 16-20 = grey
-        z_scored_response_mean = z_scored_response[:,:, object.fps * 4 : object.fps * 16].mean(axis = 0)
-        z_scored_response_median = np.median(z_scored_response[:, :, object.fps * 4: object.fps * 16], axis=0)
+        # shape n_cells, cell-by-cell threshold: first second of the response (baseline period) > std over repeats and timepoints > multiply each cell by 1.5
+        cell_threshold = z_scored_response[...,:object.fps].std(axis=(0, -1)) * std_threshold
 
-        # see if the response at peak exceeds the zscore threshold (across any orientation, SF, and timepoints)
-        cell_exceeds_threshold = (z_scored_response_mean > zscore_threshold-1).any(axis=(-1))
+        # take the z scored responses during the 'ON' period > average over repeats & timepoints (shape = (n_cells))
+        # 0-4 = grey, 4-8 = black, 8-12 = white, 12-16 = black, 16-20 = grey
+        #z_scored_response_mean = z_scored_response[..., object.fps * 4 : object.fps * 16].mean(axis = (0,-1))
+        # shape n_cells, timepoints
+        z_scored_response_mean = z_scored_response[..., object.fps * 4: object.fps * 16].mean(axis=0)
+        z_scored_response_median = np.median(z_scored_response[..., object.fps * 4: object.fps * 16], axis=0)
+
+        # see if the response at peak exceeds the mean zscore threshold (shape cell > shape cell)
+        # take 90% of threshold and see if median crosses it
+        cell_exceeds_threshold = (z_scored_response_mean > cell_threshold[:, None]).any(axis=1) & (z_scored_response_median > cell_threshold[:, None]*0.9).any(axis=1)
+        #(z_scored_response_mean > zscore_threshold-1).any(axis=(-1))
         #cell_exceeds_threshold = ((z_scored_response_mean > zscore_threshold) & (z_scored_response_median > (zscore_threshold-1) )).any(axis=(-1))
 
 
@@ -1088,7 +1224,7 @@ def build_tuning_curves (object, animal, day, subfile, zscore = False, avg_over_
     else:
         # responses_ordered: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
         # 1s wait + 1s static + 3s moving + 1s static
-        responses_ordered, thetas, sfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=zscore)
+        responses_ordered, thetas, sfs, tfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=zscore)
 
         if avg_over_param == 'SFs':
             # average over SFs > shape ((n_repeats, n_orientation, cells, timepoints))
@@ -1097,9 +1233,10 @@ def build_tuning_curves (object, animal, day, subfile, zscore = False, avg_over_
             # average over orientations > shape ((n_repeats, n_sf, cells, timepoints))
             response = responses_ordered.mean(axis=2)
         # if avg_over_param is None
-        elif (avg_over_param is None) and (sf_i is not None):
 
+        elif (avg_over_param is None) and (sf_i is not None):
             if isinstance(sf_i, np.ndarray):
+
                 # not averaging over SFs - taking a specific index of SFs living at sf_i (specific to each cell)- shape ((n_repeats, n_orientation, cells, timepoints))
                 # array of shape n_cells > representing index of preferred sf
                 preferred_sf_idx = pref_sf(object, responses_ordered)
@@ -1122,7 +1259,14 @@ def build_tuning_curves (object, animal, day, subfile, zscore = False, avg_over_
 
         # store in object > shape ((n_repeats, n_orientation/n_SF, cells))
         if (avg_over_param is None) and (sf_i is not None):
+
             object.dat[animal][day][subfile][f'tuning_curves_sf_pref'] = tuning_curve
+
+            if object.dat[animal][day][subfile]['n_theta'] == 8:
+                #print(',,,....;,', tuning_curve.shape)
+                half = tuning_curve.shape[1]//2 # n_theta / 2
+                object.dat[animal][day][subfile][f'ori_tuning_curves_sf_pref'] = (tuning_curve[:,:half,:] + tuning_curve[:,half:,:])/2
+
         else:
             object.dat[animal][day][subfile][f'tuning_curves_avg_over_{avg_over_param}'] = tuning_curve
 
@@ -1208,7 +1352,7 @@ def complex_phase_from_tuning (tuning_curves, thetas):
 # def parameter_matrix_plot(object, animal, day, subfile):
 #
 #     # responses_ordered: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
-#     param_matrix, thetas, sfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
+#     param_matrix, thetas, sfs, tfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
 #
 #     # PROPERTIES FOR SF PREFERRED
 #     param_matrix_sf_pref, tuning_curves_sf_pref, complex_sf_pref, osi_sf_pref, pref_orientation_sf_pref, _, _ = complex_phase(object, animal, day, subfile, sf_i=pref_sf(object, animal, day, subfile))
@@ -1346,15 +1490,18 @@ def store_metrics(object, animal, day, subfile, zscore_threshold = 3):
     Calculates and stores several important metrics to be plotted by plot_parameter_matrix
     '''
 
+    # if only orientations x repeats
     if ((object.dat[animal][day][subfile]['n_SF'] == 1) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
         # param_matrix: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
         param_matrix, object.dat[animal][day][subfile]['orientations'] = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
 
         _, tuning_curve, _ = build_tuning_curves(object, animal, day, subfile, zscore=False)
 
+    # if SFxO or SFxTF
     else:
         param_matrix, object.dat[animal][day][subfile]['orientations'], object.dat[animal][day][subfile][
-            'spatial_frequencies'] = build_parameter_matrix(object, animal, day, subfile, response_window='whole',
+            'spatial_frequencies'],object.dat[animal][day][subfile][
+            'temporal_frequencies'] = build_parameter_matrix(object, animal, day, subfile, response_window='whole',
                                                             zscore=True)
 
         # shape ((n_cells))
@@ -1370,7 +1517,8 @@ def store_metrics(object, animal, day, subfile, zscore_threshold = 3):
 
     object.dat[animal][day][subfile]['zscored_matrix_baseline'], object.dat[animal][day][subfile]['thresholded_cells'] = zscore_thresholding(object, animal, day, subfile, zscore_threshold=zscore_threshold)
 
-    if not ((object.dat[animal][day][subfile]['n_SF'] == 1) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
+    # if SF x O only > n_theta = 8, n_sf = 5, n_tf = 1
+    if  ((object.dat[animal][day][subfile]['n_theta'] > 1) and (object.dat[animal][day][subfile]['n_SF'] == 5) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
 
         # sf_tuning_curve: SF tuning curve at the best orientation; shape (n_cells, n_repeats, n_sf)
         # pref_theta_idx: preferred theta for each cell; shape (n_cells)
@@ -1455,9 +1603,9 @@ def parameter_matrix_plot(object, animal, day, subfile, zscore_threshold = 3):
                 if not object.show_plots:
                     plt.close()
 
-    else:
+    elif ((object.dat[animal][day][subfile]['n_theta'] != 1) and (object.dat[animal][day][subfile]['n_TF'] == 1)):
         # param_matrix: shape ((n_repeats, n_orientation, n_sf, cells, timepoints))
-        param_matrix, thetas, sfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
+        param_matrix, thetas, sfs, tfs = build_parameter_matrix(object, animal, day, subfile, response_window='whole', zscore=True)
 
         # shape ((n_cells))
         preferred_sf = pref_sf(object, param_matrix)
@@ -1641,24 +1789,71 @@ def participation_ratio (pca):
     pr = (np.sum(eigenvalues) ** 2) / np.sum(eigenvalues ** 2)
     return pr
 
-def filter_active_epochs (data_trials_array, response_threshold = 4, cell_threshold = 2):
+# def filter_active_epochs (data_trials_array, response_threshold = 4, cell_threshold = 2):
+#     '''
+#     Remove epochs with no activity or only 1-2 cells active
+#     :param data_trials_array: numpy array of shape (n_cells, n_chunks)
+#     :param threshold: z-score threshold that cells need to be to be considered active
+#     :return:
+#     '''
+#
+#     # number of timepoints that exceed the threshold for each cell in every epoch > shape n_epochs, n_cells
+#     timepoints_above_threshold = (data_trials_array > response_threshold).sum(axis=2)
+#
+#     #for each epoch, number of cells that are active in at least one timepoint (shape n_epochs)
+#     cells_above_threshold = (timepoints_above_threshold > 0).sum(axis=1)
+#
+#     # valid epochs where more than 'cell_threshold' cells have at least one timepoint > 'response_threshold' (at least 2 co-active cells in each epoch)
+#     valid_epochs = cells_above_threshold > cell_threshold  # Shape: (n_epochs,)
+#
+#     filtered_data_trials = data_trials_array[valid_epochs]
+#
+#     return filtered_data_trials, valid_epochs
+
+def perform_pca (data_trials_normalized, n_components = 10):
+    '''
+    :param data_trials_normalized: array shape (n_trials, n_features), each trial (each row) is normalized to unit length (l2 normalization)
+    '''
+    # performing PCA & projection
+    pca = PCA(n_components=n_components, svd_solver='full') # full forces the lapack solver
+    principal_components = pca.fit_transform(data_trials_normalized)
+    explained_variance_ratio = pca.explained_variance_ratio_ # eigenvalues
+    return pca, principal_components, explained_variance_ratio
+
+def filter_active_epochs (data_trials_array, response_threshold = 3, cell_threshold = 4):
     '''
     Remove epochs with no activity or only 1-2 cells active
     :param data_trials_array: numpy array of shape (n_cells, n_chunks)
     :param threshold: z-score threshold that cells need to be to be considered active
     :return:
     '''
+    # check whether each cell goes above response threshold in each epoch
+    # then count number of cells (per epoch) that exceed response threshold (shape n_epochs)
+    cells_above_threshold = np.any(data_trials_array > response_threshold, axis=-1).sum(axis = -1)
 
-    # number of timepoints that exceed the threshold for each cell in every epoch > shape n_epochs, n_cells
-    timepoints_above_threshold = (data_trials_array > response_threshold).sum(axis=2)
+    # valid epochs are only those with > 2 cells co-active (shape n_epochs)
+    valid_epochs = cells_above_threshold >= cell_threshold
 
-    #for each epoch, number of cells that are active in at least one timepoint (shape n_epochs)
-    cells_above_threshold = (timepoints_above_threshold > 0).sum(axis=1)
+    return valid_epochs
 
-    # valid epochs where more than 'cell_threshold' cells have at least one timepoint > 'response_threshold' (at least 2 co-active cells in each epoch)
-    valid_epochs = cells_above_threshold > cell_threshold  # Shape: (n_epochs,)
 
-    filtered_data_trials = data_trials_array[valid_epochs]
+def decay_eigenspectra(eigenvalues):
+    '''
+    Fit power-law in log-log space
 
-    return filtered_data_trials, valid_epochs
+    Power-law: y = Ax**-alpha, where x is the rank, alpha is the slope (rate of decay), A is constant (intercept in log-log space)
+    - to solve for alpha > take log of both sides
+    - > log(y) = log(Ax**-alpha)
+    - > log(y) = log(A) + log(x**-alpha)
+    - > log(y) = log(A) -alpha*log(x)
+    - > log(y) ~= -alpha*log(x)
+    - > log(y)/log(x) ~= -alpha
 
+    :param eigenvalues: variance explained output from PCA
+    :return: -slope
+    '''
+    x = np.arange(1, len(eigenvalues) + 1)
+    log_x = np.log10(x)
+    log_y = np.log10(eigenvalues + 1e-10)  # add epsilon to avoid log(0)
+    slope, intercept, r_value, _, _ = linregress(log_x, log_y)
+    return -slope

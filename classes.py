@@ -161,6 +161,8 @@ class DataAnalysis:
                             if (self.dat[animal][day][sub_file]['n_SF'] == 1) and (self.dat[animal][day][sub_file]['n_TF'] == 1):
                                 print('8 ori x 6 repeats')
 
+                                store_metrics(self, animal, day, sub_file, zscore_threshold=3)
+
                             # # calculating orientation selectivity > average responses to the same orientation within the same 'block'
                             # responses_gratings(self.dat[animal][day][sub_file])
                             #
@@ -187,7 +189,7 @@ class DataAnalysis:
                                 #plot_activity_rasters(self, animal, day, sub_file)
                                 #hist_osi_angle(self, animal, day, sub_file
 
-                            store_metrics(self, animal, day, sub_file, zscore_threshold=3)
+                                store_metrics(self, animal, day, sub_file, zscore_threshold=3)
                             #parameter_matrix_plot(self, animal, day, sub_file, zscore_threshold = 3)
 
                         elif 'chirp' in sub_file:
@@ -201,10 +203,10 @@ class DataAnalysis:
                             #on_off_responses(self, animal, day, sub_file)
 
                             self.dat[animal][day][sub_file]['zscored_matrix_baseline'],  self.dat[animal][day][sub_file]['thresholded_cells'] = zscore_thresholding(self, animal, day, sub_file, zscore_threshold=3)
-                        
+
 
                             self.dat[animal][day][sub_file]['on_off_index'] = on_off_scores(self, animal, day, sub_file)
-                            self.dat[animal][day][sub_file]['peak_response_idx'] = response_speed(self, animal, day, sub_file)
+                            self.dat[animal][day][sub_file]['on_slope'] = response_speed(self, animal, day, sub_file)
                             self.dat[animal][day][sub_file]['response_amplitude'] = response_amplitude(self, animal, day, sub_file)
 
         #dump(self,  os.path.join(self.save_path, 'dat.z'))
